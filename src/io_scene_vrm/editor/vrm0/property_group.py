@@ -60,11 +60,11 @@ class Vrm0HumanoidBonePropertyGroup(PropertyGroup):
         name="Unity's HumanLimit.useDefaultValues",
         default=True,
     )
-    min: FloatVectorProperty(  # type: ignore[valid-type]  # noqa: A003
+    min: FloatVectorProperty(  # type: ignore[valid-type]
         size=3,
         name="Unity's HumanLimit.min",
     )
-    max: FloatVectorProperty(  # type: ignore[valid-type]  # noqa: A003
+    max: FloatVectorProperty(  # type: ignore[valid-type]
         size=3,
         name="Unity's HumanLimit.max",
     )
@@ -120,8 +120,8 @@ class Vrm0HumanoidBonePropertyGroup(PropertyGroup):
         bone: str  # type: ignore[no-redef]
         node: BonePropertyGroup  # type: ignore[no-redef]
         use_default_values: bool  # type: ignore[no-redef]
-        min: Sequence[float]  # type: ignore[no-redef]  # noqa: A003
-        max: Sequence[float]  # type: ignore[no-redef]  # noqa: A003
+        min: Sequence[float]  # type: ignore[no-redef]
+        max: Sequence[float]  # type: ignore[no-redef]
         center: Sequence[float]  # type: ignore[no-redef]
         axis_length: float  # type: ignore[no-redef]
         node_candidates: CollectionPropertyProtocol[StringPropertyGroup]  # type: ignore[no-redef]
@@ -196,9 +196,10 @@ class Vrm0HumanoidPropertyGroup(PropertyGroup):
         return True
 
     @staticmethod
-    def check_last_bone_names_and_update(
+    def update_all_node_candidates(
         armature_data_name: str,
-        defer: bool = True,
+        defer: bool = False,
+        force: bool = False,
     ) -> None:
         armature_data = bpy.data.armatures.get(armature_data_name)
         if not armature_data:
@@ -209,17 +210,19 @@ class Vrm0HumanoidPropertyGroup(PropertyGroup):
         for bone in sorted(bones, key=lambda b: str(b.name)):
             bone_names.append(bone.name)
             bone_names.append(bone.parent.name if bone.parent else "")
-        up_to_date = bone_names == [str(n.value) for n in humanoid.last_bone_names]
 
-        if up_to_date:
-            return
+        if not force:
+            up_to_date = bone_names == [str(n.value) for n in humanoid.last_bone_names]
+            if up_to_date:
+                return
 
         if defer:
             bpy.app.timers.register(
                 functools.partial(
-                    Vrm0HumanoidPropertyGroup.check_last_bone_names_and_update,
+                    Vrm0HumanoidPropertyGroup.update_all_node_candidates,
                     armature_data_name,
                     False,
+                    force,
                 )
             )
             return
@@ -292,7 +295,7 @@ class Vrm0HumanoidPropertyGroup(PropertyGroup):
                 if human_bone.node.bone_name not in found_node_bone_names:
                     found_node_bone_names.append(human_bone.node.bone_name)
                     continue
-                human_bone.node.bone_name = ""
+                human_bone.node.set_bone_name(None)
                 refresh = True
                 fixup = True
                 break

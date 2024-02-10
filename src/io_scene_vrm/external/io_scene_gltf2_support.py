@@ -112,6 +112,14 @@ def create_export_settings() -> dict[str, object]:
         # https://github.com/KhronosGroup/glTF-Blender-IO/blob/765c1bd8f59ce34d6e346147f379af191969777f/addons/io_scene_gltf2/__init__.py#L785
         # https://github.com/KhronosGroup/glTF-Blender-IO/blob/765c1bd8f59ce34d6e346147f379af191969777f/addons/io_scene_gltf2/__init__.py#L201-L208
         "gltf_add_webp": False,
+        # https://github.com/KhronosGroup/glTF-Blender-IO/blob/2debd75ace303f3a3b00a43e9d7a9507af32f194/addons/io_scene_gltf2/__init__.py#L941
+        "exported_images": {},
+        # https://github.com/KhronosGroup/glTF-Blender-IO/blob/2debd75ace303f3a3b00a43e9d7a9507af32f194/addons/io_scene_gltf2/__init__.py#L942
+        "exported_texture_nodes": [],
+        # https://github.com/KhronosGroup/glTF-Blender-IO/blob/2debd75ace303f3a3b00a43e9d7a9507af32f194/addons/io_scene_gltf2/__init__.py#L943
+        "additional_texture_export": [],
+        # https://github.com/KhronosGroup/glTF-Blender-IO/blob/2debd75ace303f3a3b00a43e9d7a9507af32f194/addons/io_scene_gltf2/__init__.py#L944
+        "additional_texture_export_current_idx": 0,
     }
 
 
@@ -121,16 +129,16 @@ class ExportSceneGltfArguments:
     check_existing: bool
     export_format: str
     export_extras: bool
+    export_def_bones: bool
     export_current_frame: bool
     use_selection: bool
     export_animations: bool
     export_rest_position_armature: bool
-    export_def_bones: bool
-    export_apply: bool
     export_all_influences: bool
     export_lights: bool
     use_active_scene: bool
     export_try_sparse_sk: bool
+    export_apply: bool
 
 
 def __invoke_export_scene_gltf(arguments: ExportSceneGltfArguments) -> set[str]:
@@ -140,14 +148,14 @@ def __invoke_export_scene_gltf(arguments: ExportSceneGltfArguments) -> set[str]:
             check_existing=arguments.check_existing,
             export_format=arguments.export_format,
             export_extras=arguments.export_extras,
+            export_def_bones=(bpy.app.version >= (3, 3)) and arguments.export_def_bones,
             export_current_frame=arguments.export_current_frame,
             use_selection=arguments.use_selection,
             export_animations=arguments.export_animations,
-            export_def_bones=arguments.export_def_bones,  # Don't export control bones not marked as deform
-            export_apply=arguments.export_apply,  # Enable non-destructive export
             export_all_influences=arguments.export_all_influences,
             export_lights=arguments.export_lights,
             use_active_scene=arguments.use_active_scene,  # Reduce File Size
+            export_apply=arguments.export_apply,
         )
 
     if bpy.app.version < (4,):
@@ -156,15 +164,15 @@ def __invoke_export_scene_gltf(arguments: ExportSceneGltfArguments) -> set[str]:
             check_existing=arguments.check_existing,
             export_format=arguments.export_format,
             export_extras=arguments.export_extras,
+            export_def_bones=arguments.export_def_bones,
             export_current_frame=arguments.export_current_frame,
             use_selection=arguments.use_selection,
             export_animations=arguments.export_animations,
             export_rest_position_armature=arguments.export_rest_position_armature,
-            export_def_bones=arguments.export_def_bones,  # Don't export control bones not marked as deform
-            export_apply=arguments.export_apply,  # Enable non-destructive export
             export_all_influences=arguments.export_all_influences,
             export_lights=arguments.export_lights,
             use_active_scene=arguments.use_active_scene,  # Reduce File Size
+            export_apply=arguments.export_apply,
         )
 
     return bpy.ops.export_scene.gltf(
@@ -172,16 +180,16 @@ def __invoke_export_scene_gltf(arguments: ExportSceneGltfArguments) -> set[str]:
         check_existing=arguments.check_existing,
         export_format=arguments.export_format,
         export_extras=arguments.export_extras,
+        export_def_bones=arguments.export_def_bones,
         export_current_frame=arguments.export_current_frame,
         use_selection=arguments.use_selection,
         export_animations=arguments.export_animations,
         export_rest_position_armature=arguments.export_rest_position_armature,
-        export_def_bones=arguments.export_def_bones,  # Don't export control bones not marked as deform
-        export_apply=arguments.export_apply,  # Enable non-destructive export
         export_all_influences=arguments.export_all_influences,
         export_lights=arguments.export_lights,
         use_active_scene=arguments.use_active_scene,  # Reduce File Size
         export_try_sparse_sk=arguments.export_try_sparse_sk,
+        export_apply=arguments.export_apply,
     )
 
 

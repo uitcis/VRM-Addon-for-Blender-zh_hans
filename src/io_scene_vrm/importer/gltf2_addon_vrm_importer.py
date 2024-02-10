@@ -1,7 +1,9 @@
 import base64
 import contextlib
+import functools
 import json
 import math
+import operator
 import re
 import secrets
 import shutil
@@ -34,6 +36,7 @@ from ..common.fs import (
 from ..common.gl import GL_FLOAT, GL_LINEAR, GL_REPEAT, GL_UNSIGNED_SHORT
 from ..common.gltf import FLOAT_NEGATIVE_MAX, FLOAT_POSITIVE_MAX, pack_glb, parse_glb
 from ..common.logging import get_logger
+from ..common.preferences import ImportPreferencesProtocol
 from ..common.version import addon_version
 from ..common.vrm1 import human_bone as vrm1_human_bone
 from ..common.vrm1.human_bone import HumanBoneName, HumanBoneSpecifications
@@ -71,12 +74,9 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
         self,
         context: Context,
         parse_result: ParseResult,
-        extract_textures_into_folder: bool,
-        make_new_texture_folder: bool,
+        preferences: ImportPreferencesProtocol,
     ) -> None:
-        super().__init__(
-            context, parse_result, extract_textures_into_folder, make_new_texture_folder
-        )
+        super().__init__(context, parse_result, preferences)
         self.import_id = Gltf2AddonImporterUserExtension.update_current_import_id()
         self.temp_object_name_count = 0
         self.object_names: dict[int, str] = {}
@@ -90,7 +90,7 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
             wm.progress_update(1)
             self.import_gltf2_with_indices()
             wm.progress_update(2)
-            if self.extract_textures_into_folder:
+            if self.preferences.extract_textures_into_folder:
                 self.extract_textures(repack=False)
             elif bpy.app.version < (3, 1):
                 self.extract_textures(repack=True)
@@ -654,7 +654,8 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
         # メッシュノードの子供にボーンノードが存在する場合は、
         # そのメッシュノードもボーン扱いする
         bone_node_indices.extend(
-            sum(
+            functools.reduce(
+                operator.iconcat,
                 [
                     self.find_middle_bone_indices(
                         node_dicts, bone_node_indices, bone_node_index, []
@@ -1271,6 +1272,9 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
             obj.pop(extras_mesh_index_key, None)
             data.pop(extras_mesh_index_key, None)
 
+            # ここでupdateしないとエクスポート時にCustom Propertyが復活することがある
+            data.update()
+
         extras_material_index_key = self.import_id + "Materials"
         for material in bpy.data.materials:
             if self.is_temp_object_name(material.name):
@@ -1419,7 +1423,7 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
 
     def extract_textures(self, repack: bool) -> None:
         dir_path = self.parse_result.filepath.with_suffix(".vrm.textures").absolute()
-        if self.make_new_texture_folder or repack:
+        if self.preferences.make_new_texture_folder or repack:
             dir_path = create_unique_indexed_directory_path(dir_path)
         dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -1499,8 +1503,8 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
             return
         addon_extension = self.armature_data.vrm_addon_extension
 
-        Vrm1HumanBonesPropertyGroup.check_last_bone_names_and_update(
-            self.armature_data.name, defer=False
+        Vrm1HumanBonesPropertyGroup.update_all_node_candidates(
+            self.armature_data.name, force=True
         )
 
         human_bones = addon_extension.vrm1.humanoid.human_bones
@@ -2036,7 +2040,7 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
             bone_name = self.bone_names.get(node_index)
             if not isinstance(bone_name, str) or bone_name in assigned_bone_names:
                 continue
-            human_bone_name_to_human_bone[human_bone_name].node.bone_name = bone_name
+            human_bone_name_to_human_bone[human_bone_name].node.set_bone_name(bone_name)
             assigned_bone_names.append(bone_name)
 
     def load_vrm1_first_person(
@@ -2320,7 +2324,7 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
             if isinstance(node_index, int):
                 bone_name = self.bone_names.get(node_index)
                 if isinstance(bone_name, str):
-                    collider.node.bone_name = bone_name
+                    collider.node.set_bone_name(bone_name)
                     if collider.bpy_object:
                         collider.bpy_object.name = f"{bone_name} Collider"
                     bone = self.armature_data.bones.get(collider.node.bone_name)
@@ -2483,7 +2487,7 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
             if isinstance(center_index, int):
                 bone_name = self.bone_names.get(center_index)
                 if bone_name:
-                    spring.center.bone_name = bone_name
+                    spring.center.set_bone_name(bone_name)
 
             joint_dicts = spring_dict.get("joints")
             if not isinstance(joint_dicts, list):
@@ -2503,7 +2507,7 @@ class Gltf2AddonVrmImporter(AbstractBaseVrmImporter):
                 if isinstance(node_index, int):
                     bone_name = self.bone_names.get(node_index)
                     if bone_name:
-                        joint.node.bone_name = bone_name
+                        joint.node.set_bone_name(bone_name)
 
                 hit_radius = joint_dict.get("hitRadius")
                 if isinstance(hit_radius, (int, float)):

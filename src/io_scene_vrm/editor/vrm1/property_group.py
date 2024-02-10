@@ -395,14 +395,15 @@ class Vrm1HumanBonesPropertyGroup(PropertyGroup):
                 if human_bone.node.bone_name not in found_node_bone_names:
                     found_node_bone_names.append(human_bone.node.bone_name)
                     continue
-                human_bone.node.bone_name = ""
+                human_bone.node.set_bone_name(None)
                 fixup = True
                 break
 
     @staticmethod
-    def check_last_bone_names_and_update(
+    def update_all_node_candidates(
         armature_data_name: str,
-        defer: bool = True,
+        defer: bool = False,
+        force: bool = False,
     ) -> None:
         armature_data = bpy.data.armatures.get(armature_data_name)
         if not isinstance(armature_data, Armature):
@@ -412,17 +413,21 @@ class Vrm1HumanBonesPropertyGroup(PropertyGroup):
         for bone in sorted(armature_data.bones.values(), key=lambda b: str(b.name)):
             bone_names.append(bone.name)
             bone_names.append(bone.parent.name if bone.parent else "")
-        up_to_date = bone_names == [str(n.value) for n in human_bones.last_bone_names]
 
-        if up_to_date:
-            return
+        if not force:
+            up_to_date = bone_names == [
+                str(n.value) for n in human_bones.last_bone_names
+            ]
+            if up_to_date:
+                return
 
         if defer:
             bpy.app.timers.register(
                 functools.partial(
-                    Vrm1HumanBonesPropertyGroup.check_last_bone_names_and_update,
+                    Vrm1HumanBonesPropertyGroup.update_all_node_candidates,
                     armature_data_name,
                     False,
+                    force,
                 )
             )
             return
@@ -431,6 +436,7 @@ class Vrm1HumanBonesPropertyGroup(PropertyGroup):
         for bone_name in bone_names:
             last_bone_name = human_bones.last_bone_names.add()
             last_bone_name.value = bone_name
+
         human_bone_name_to_human_bone = human_bones.human_bone_name_to_human_bone()
         bpy_bone_name_to_human_bone_specification: dict[str, HumanBoneSpecification] = {
             human_bone.node.bone_name: HumanBoneSpecifications.get(human_bone_name)
@@ -575,7 +581,7 @@ class Vrm1LookAtPropertyGroup(PropertyGroup):
             1,
         ),
     )
-    type: EnumProperty(  # type: ignore[valid-type]  # noqa: A003
+    type: EnumProperty(  # type: ignore[valid-type]
         name="Type",
         items=type_items,
     )
@@ -858,7 +864,7 @@ class Vrm1LookAtPropertyGroup(PropertyGroup):
         # This code is auto generated.
         # `poetry run python tools/property_typing.py`
         offset_from_head_bone: Sequence[float]  # type: ignore[no-redef]
-        type: str  # type: ignore[no-redef]  # noqa: A003
+        type: str  # type: ignore[no-redef]
         range_map_horizontal_inner: (  # type: ignore[no-redef]
             Vrm1LookAtRangeMapPropertyGroup
         )
@@ -887,7 +893,7 @@ class Vrm1MeshAnnotationPropertyGroup(PropertyGroup):
         ("thirdPersonOnly", "Third-Person Only", "", 2),
         ("firstPersonOnly", "First-Person Only", "", 3),
     )
-    type: EnumProperty(  # type: ignore[valid-type]  # noqa: A003
+    type: EnumProperty(  # type: ignore[valid-type]
         items=type_items,
         name="First Person Type",
     )
@@ -896,7 +902,7 @@ class Vrm1MeshAnnotationPropertyGroup(PropertyGroup):
         # This code is auto generated.
         # `poetry run python tools/property_typing.py`
         node: MeshObjectPropertyGroup  # type: ignore[no-redef]
-        type: str  # type: ignore[no-redef]  # noqa: A003
+        type: str  # type: ignore[no-redef]
 
 
 # https://github.com/vrm-c/vrm-specification/blob/6fb6baaf9b9095a84fb82c8384db36e1afeb3558/specification/VRMC_vrm-1.0-beta/schema/VRMC_vrm.firstPerson.schema.json
@@ -948,7 +954,7 @@ class Vrm1MaterialColorBindPropertyGroup(PropertyGroup):
         ("rimColor", "Rim Color", "", 3),
         ("outlineColor", "Outline Color", "", 4),
     )
-    type: EnumProperty(  # type: ignore[valid-type]  # noqa: A003
+    type: EnumProperty(  # type: ignore[valid-type]
         name="Type",
         items=type_items,
     )
@@ -989,7 +995,7 @@ class Vrm1MaterialColorBindPropertyGroup(PropertyGroup):
         # This code is auto generated.
         # `poetry run python tools/property_typing.py`
         material: Optional[Material]  # type: ignore[no-redef]
-        type: str  # type: ignore[no-redef]  # noqa: A003
+        type: str  # type: ignore[no-redef]
         target_value: Sequence[float]  # type: ignore[no-redef]
         target_value_as_rgb: Sequence[float]  # type: ignore[no-redef]
 

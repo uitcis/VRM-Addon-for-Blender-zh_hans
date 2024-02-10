@@ -1,6 +1,5 @@
-# Copyright (c) 2018 iCyP
-# Released under the MIT license
-# https://opensource.org/licenses/mit-license.php
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2018 iCyP
 
 import json
 import math
@@ -25,7 +24,7 @@ from mathutils import Matrix, Vector
 from ..common import convert, deep, shader
 from ..common.deep import Json
 from ..common.logging import get_logger
-from ..common.preferences import get_preferences
+from ..common.preferences import ImportPreferencesProtocol
 from ..common.version import addon_version
 from ..common.vrm0.human_bone import HumanBoneName, HumanBoneSpecifications
 from ..editor import make_armature, migration
@@ -58,13 +57,11 @@ class AbstractBaseVrmImporter(ABC):
         self,
         context: Context,
         parse_result: ParseResult,
-        extract_textures_into_folder: bool,
-        make_new_texture_folder: bool,
+        preferences: ImportPreferencesProtocol,
     ) -> None:
         self.context = context
         self.parse_result = parse_result
-        self.extract_textures_into_folder = extract_textures_into_folder
-        self.make_new_texture_folder = make_new_texture_folder
+        self.preferences = preferences
 
         self.meshes: dict[int, Object] = {}
         self.images: dict[int, Image] = {}
@@ -124,8 +121,9 @@ class AbstractBaseVrmImporter(ABC):
         addon_extension = self.armature_data.vrm_addon_extension
 
         Vrm0HumanoidPropertyGroup.fixup_human_bones(armature)
-        Vrm0HumanoidPropertyGroup.check_last_bone_names_and_update(
-            self.armature_data.name, defer=False
+        Vrm0HumanoidPropertyGroup.update_all_node_candidates(
+            self.armature_data.name,
+            force=True,
         )
 
         human_bones = addon_extension.vrm0.humanoid.human_bones
@@ -925,7 +923,7 @@ class AbstractBaseVrmImporter(ABC):
                 else:
                     human_bone = humanoid.human_bones.add()
                 human_bone.bone = bone
-                human_bone.node.bone_name = self.bone_names[node]
+                human_bone.node.set_bone_name(self.bone_names[node])
 
                 use_default_values = human_bone_dict.get("useDefaultValues")
                 if isinstance(use_default_values, bool):
@@ -991,9 +989,9 @@ class AbstractBaseVrmImporter(ABC):
 
         first_person_bone = first_person_dict.get("firstPersonBone")
         if isinstance(first_person_bone, int) and first_person_bone in self.bone_names:
-            first_person.first_person_bone.bone_name = self.bone_names[
-                first_person_bone
-            ]
+            first_person.first_person_bone.set_bone_name(
+                self.bone_names[first_person_bone]
+            )
 
         first_person_bone_offset = convert.vrm_json_vector3_to_tuple(
             first_person_dict.get("firstPersonBoneOffset")
@@ -1186,7 +1184,7 @@ class AbstractBaseVrmImporter(ABC):
                 continue
 
             bone_name = self.bone_names[node]
-            collider_group.node.bone_name = bone_name
+            collider_group.node.set_bone_name(bone_name)
             collider_dicts = collider_group_dict.get("colliders")
             if not isinstance(collider_dicts, list):
                 continue
@@ -1276,7 +1274,7 @@ class AbstractBaseVrmImporter(ABC):
 
             center = bone_group_dict.get("center")
             if isinstance(center, int) and center in self.bone_names:
-                bone_group.center.bone_name = self.bone_names[center]
+                bone_group.center.set_bone_name(self.bone_names[center])
 
             hit_radius = bone_group_dict.get("hitRadius")
             if isinstance(hit_radius, (int, float)):
@@ -1289,7 +1287,7 @@ class AbstractBaseVrmImporter(ABC):
                     if not isinstance(bone, int) or bone not in self.bone_names:
                         continue
 
-                    bone_prop.bone_name = self.bone_names[bone]
+                    bone_prop.set_bone_name(self.bone_names[bone])
 
             collider_group_dicts = bone_group_dict.get("colliderGroups")
             if isinstance(collider_group_dicts, list):
@@ -1307,13 +1305,16 @@ class AbstractBaseVrmImporter(ABC):
             bone_group.refresh(armature)
 
     def viewport_setup(self) -> None:
-        preferences = get_preferences(self.context)
-        if self.armature and preferences.set_armature_display_to_wire:
-            self.armature.display_type = "WIRE"
-        if self.armature and preferences.set_armature_display_to_show_in_front:
-            self.armature.show_in_front = True
+        if self.armature:
+            if self.preferences.set_armature_display_to_wire:
+                self.armature.display_type = "WIRE"
+            if self.preferences.set_armature_display_to_show_in_front:
+                self.armature.show_in_front = True
+            if self.preferences.set_armature_bone_shape_to_default:
+                for bone in self.armature.pose.bones:
+                    bone.custom_shape = None
 
-        if preferences.set_view_transform_to_standard_on_import:
+        if self.preferences.set_view_transform_to_standard_on_import:
             # https://github.com/saturday06/VRM-Addon-for-Blender/issues/336#issuecomment-1760729404
             view_settings = self.context.scene.view_settings
             try:
@@ -1324,7 +1325,7 @@ class AbstractBaseVrmImporter(ABC):
                     + ' doesn\'t support "Standard".'
                 )
 
-        if preferences.set_shading_type_to_material_on_import:
+        if self.preferences.set_shading_type_to_material_on_import:
             screen = self.context.screen
             for area in screen.areas:
                 for space in area.spaces:

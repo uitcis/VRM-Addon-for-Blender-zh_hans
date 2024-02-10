@@ -11,7 +11,7 @@ on:
 
 jobs:
   test-windows:
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       matrix:
         archive_url:
@@ -26,7 +26,7 @@ jobs:
           submodules: recursive
       - name: Cache archive
         id: cache-archive
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: blender.zip
           key: ${{ matrix.archive_url }}-archive-3
@@ -36,7 +36,7 @@ jobs:
           $retry = 10
           for (; $true; $retry--) {
             try {
-              Invoke-WebRequest -MaximumRetryCount 5 -Uri "${{ matrix.archive_url }}" -OutFile blender.zip
+              Start-BitsTransfer blender.zip -Source "${{ matrix.archive_url }}"
               break
             } catch {
               if ($retry -le 0) {
@@ -58,13 +58,13 @@ jobs:
           path: tests/resources/vrm/*/temp
 
   test-macos:
-    runs-on: macos-13
+    runs-on: macos-14
     strategy:
       matrix:
         archive_url:
-          - https://mirrors.ocf.berkeley.edu/blender/release/Blender2.93/blender-2.93.9-macos-x64.dmg
-          - https://mirrors.ocf.berkeley.edu/blender/release/Blender3.3/blender-3.3.0-macos-x64.dmg
-          - https://mirrors.ocf.berkeley.edu/blender/release/Blender3.6/blender-3.6.0-macos-x64.dmg
+          - https://mirrors.ocf.berkeley.edu/blender/release/Blender2.93/blender-2.93.9-macos-arm64.dmg
+          - https://mirrors.ocf.berkeley.edu/blender/release/Blender3.3/blender-3.3.0-macos-arm64.dmg
+          - https://mirrors.ocf.berkeley.edu/blender/release/Blender3.6/blender-3.6.0-macos-arm64.dmg
     env:
       BLENDER_VRM_EXCLUDE_GUI_TEST: true
     steps:
@@ -73,7 +73,7 @@ jobs:
           submodules: recursive
       - name: Cache archive
         id: cache-archive
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: blender.dmg
           key: ${{ matrix.archive_url }}-archive-3

@@ -69,7 +69,6 @@ from bpy.types import (
     ShaderNodeTexIES,
     ShaderNodeTexImage,
     ShaderNodeTexMagic,
-    ShaderNodeTexMusgrave,
     ShaderNodeTexNoise,
     ShaderNodeTexPointDensity,
     ShaderNodeTexSky,
@@ -622,11 +621,6 @@ def copy_node(
         to_node, ShaderNodeTexNoise
     ):
         to_node.noise_dimensions = from_node.noise_dimensions
-    if isinstance(from_node, ShaderNodeTexMusgrave) and isinstance(
-        to_node, ShaderNodeTexMusgrave
-    ):
-        to_node.musgrave_dimensions = from_node.musgrave_dimensions
-        to_node.musgrave_type = from_node.musgrave_type
     if isinstance(from_node, ShaderNodeTexMagic) and isinstance(
         to_node, ShaderNodeTexMagic
     ):
@@ -849,6 +843,15 @@ def copy_node(
         ):
             to_node.distribution = from_node.distribution
 
+    if bpy.app.version < (4, 1):
+        from bpy.types import ShaderNodeTexMusgrave
+
+        if isinstance(from_node, ShaderNodeTexMusgrave) and isinstance(
+            to_node, ShaderNodeTexMusgrave
+        ):
+            to_node.musgrave_dimensions = from_node.musgrave_dimensions
+            to_node.musgrave_type = from_node.musgrave_type
+
 
 def clear_node_tree(
     node_tree: Optional[NodeTree], clear_inputs_outputs: bool = False
@@ -984,7 +987,14 @@ def copy_node_tree_interface_socket(
     elif isinstance(from_socket, color_classes) and isinstance(
         to_socket, color_classes
     ):
-        to_socket.default_value = deepcopy(from_socket.default_value[0:4])
+        to_socket.default_value = deepcopy(
+            (
+                from_socket.default_value[0],
+                from_socket.default_value[1],
+                from_socket.default_value[2],
+                from_socket.default_value[3],
+            )
+        )
     elif isinstance(from_socket, vector_classes) and isinstance(
         to_socket, vector_classes
     ):

@@ -1,4 +1,4 @@
-﻿import math
+import math
 import tempfile
 from copy import deepcopy
 from os import environ
@@ -1797,7 +1797,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             if not human_bone.node.bone_name:
                 continue
             human_bone_name_to_bone_name[human_bone_name] = human_bone.node.bone_name
-            human_bone.node.bone_name = ""
+            human_bone.node.set_bone_name(None)
 
         previous_active = context.view_layer.objects.active
         try:
@@ -1920,9 +1920,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                 bpy.ops.object.mode_set(mode="OBJECT")
             context.view_layer.objects.active = previous_active
 
-        Vrm1HumanBonesPropertyGroup.check_last_bone_names_and_update(
-            armature_data.name, defer=False
-        )
+        Vrm1HumanBonesPropertyGroup.update_all_node_candidates(armature_data.name)
 
         human_bones.head.node.bone_name = head_bone_name
         human_bones.spine.node.bone_name = spine_bone_name
@@ -1969,9 +1967,10 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         for human_bone_name, human_bone in human_bone_name_to_human_bone.items():
             bone_name = human_bone_name_to_bone_name.get(human_bone_name)
             if bone_name:
-                human_bone.node.bone_name = bone_name
+                human_bone.node.set_bone_name(bone_name)
             else:
-                human_bone.node.bone_name = ""
+                human_bone.node.set_bone_name(None)
+        Vrm1HumanBonesPropertyGroup.update_all_node_candidates(armature_data.name)
 
         previous_active = context.view_layer.objects.active
         try:
@@ -2042,12 +2041,12 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                         check_existing=False,
                         export_format="GLB",
                         export_extras=True,
+                        export_def_bones=True,
                         export_current_frame=True,
                         use_selection=True,
-                        export_def_bones=True,
                         export_animations=True,
                         export_rest_position_armature=False,
-                        export_apply=True,  # Enable non-destructive export
+                        export_apply=True,
                         # Models may appear incorrectly in many viewers
                         export_all_influences=self.export_all_influences,
                         # TODO: Expose UI Option, Unity allows light export
@@ -2427,7 +2426,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
 
         asset_dict["generator"] = generator
 
-        if len(body_binary):
+        if body_binary:
             buffer_dicts = json_dict.get("buffers")
             if not isinstance(buffer_dicts, list) or not buffer_dicts:
                 buffer_dicts = []
