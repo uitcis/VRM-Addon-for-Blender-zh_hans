@@ -126,7 +126,6 @@ def draw_export_preferences_layout(
 
     layout.prop(preferences, "export_invisibles")
     layout.prop(preferences, "export_only_selections")
-    layout.prop(preferences, "export_only_deform_bones")
     layout.prop(preferences, "export_apply_modifiers")
     layout.prop(preferences, "enable_advanced_preferences")
     if preferences.enable_advanced_preferences:
@@ -181,10 +180,6 @@ class VrmAddonPreferences(AddonPreferences):
     )
     export_only_selections: BoolProperty(  # type: ignore[valid-type]
         name="Export Only Selections",
-    )
-    export_only_deform_bones: BoolProperty(  # type: ignore[valid-type]
-        name="Export Only Deform Bones",
-        default=True,
     )
     export_apply_modifiers: BoolProperty(  # type: ignore[valid-type]
         name="Apply Modifiers",
@@ -248,7 +243,6 @@ class VrmAddonPreferences(AddonPreferences):
         set_armature_bone_shape_to_default: bool  # type: ignore[no-redef]
         export_invisibles: bool  # type: ignore[no-redef]
         export_only_selections: bool  # type: ignore[no-redef]
-        export_only_deform_bones: bool  # type: ignore[no-redef]
         export_apply_modifiers: bool  # type: ignore[no-redef]
         enable_advanced_preferences: bool  # type: ignore[no-redef]
         export_fb_ngon_encoding: bool  # type: ignore[no-redef]

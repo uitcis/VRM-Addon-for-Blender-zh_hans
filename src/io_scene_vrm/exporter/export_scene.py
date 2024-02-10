@@ -85,11 +85,6 @@ class EXPORT_SCENE_OT_vrm(Operator, ExportHelper):
         name="Export Only Selections",
         update=export_vrm_update_addon_preferences,
     )
-    export_only_deform_bones: BoolProperty(  # type: ignore[valid-type]
-        name="Export Only Deform Bones",
-        update=export_vrm_update_addon_preferences,
-        default=True,
-    )
     export_apply_modifiers: BoolProperty(  # type: ignore[valid-type]
         name="Apply Modifiers",
         update=export_vrm_update_addon_preferences,
@@ -286,7 +281,6 @@ class EXPORT_SCENE_OT_vrm(Operator, ExportHelper):
         use_addon_preferences: bool  # type: ignore[no-redef]
         export_invisibles: bool  # type: ignore[no-redef]
         export_only_selections: bool  # type: ignore[no-redef]
-        export_only_deform_bones: bool  # type: ignore[no-redef]
         export_apply_modifiers: bool  # type: ignore[no-redef]
         enable_advanced_preferences: bool  # type: ignore[no-redef]
         export_fb_ngon_encoding: bool  # type: ignore[no-redef]
