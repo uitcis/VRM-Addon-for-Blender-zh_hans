@@ -4,6 +4,7 @@ import math
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+from sys import float_info
 from typing import Optional, Union
 from urllib.parse import urlparse
 
@@ -35,11 +36,13 @@ class NodeRestPoseTree:
     node_index: int
     local_matrix: Matrix
     children: tuple["NodeRestPoseTree", ...]
+    is_root: bool
 
     @staticmethod
     def build(
         node_dicts: list[Json],
         node_index: int,
+        is_root: bool,
     ) -> list["NodeRestPoseTree"]:
         if not 0 <= node_index < len(node_dicts):
             return []
@@ -64,7 +67,7 @@ class NodeRestPoseTree:
         scale_float3 = convert.float3_or_none(node_dict.get("scale"))
         if scale_float3:
             x, y, z = scale_float3
-            scale = Vector((x, -z, y))
+            scale = Vector((x, z, y))
         else:
             scale = Vector((1, 1, 1))
 
@@ -82,7 +85,7 @@ class NodeRestPoseTree:
             children = tuple(
                 itertools.chain(
                     *(
-                        NodeRestPoseTree.build(node_dicts, child_index)
+                        NodeRestPoseTree.build(node_dicts, child_index, is_root=False)
                         for child_index in child_indices
                         if isinstance(child_index, int)
                     )
@@ -96,6 +99,7 @@ class NodeRestPoseTree:
                 node_index=node_index,
                 local_matrix=local_matrix,
                 children=children,
+                is_root=is_root,
             )
         ]
 
@@ -455,7 +459,9 @@ def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[st
         node_index_to_human_bone_name[node_index] = human_bone_name
 
     root_node_index = find_root_node_index(node_dicts, hips_node_index, set())
-    node_rest_pose_trees = NodeRestPoseTree.build(node_dicts, root_node_index)
+    node_rest_pose_trees = NodeRestPoseTree.build(
+        node_dicts, root_node_index, is_root=True
+    )
     if len(node_rest_pose_trees) != 1:
         return {"CANCELLED"}
     node_rest_pose_tree = node_rest_pose_trees[0]
@@ -577,18 +583,18 @@ def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[st
                 default_preview_value = 0.0
         else:
             default_preview_value = 0.0
-        expression_name_to_default_preview_value[
-            expression_name
-        ] = default_preview_value
+        expression_name_to_default_preview_value[expression_name] = (
+            default_preview_value
+        )
 
         expression_translation_keyframes = node_index_to_translation_keyframes.get(
             node_index
         )
         if expression_translation_keyframes is None:
             continue
-        expression_name_to_translation_keyframes[
-            expression_name
-        ] = expression_translation_keyframes
+        expression_name_to_translation_keyframes[expression_name] = (
+            expression_translation_keyframes
+        )
 
     timestamps = [
         timestamp
@@ -637,6 +643,7 @@ def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[st
             humanoid_parent_rest_world_matrix=Matrix(),
             intermediate_rest_local_matrix=Matrix(),
             intermediate_pose_local_matrix=Matrix(),
+            parent_node_rest_pose_world_matrix=Matrix(),
         )
         assign_expression_keyframe(
             armature_data,
@@ -717,6 +724,7 @@ def assign_humanoid_keyframe(
     humanoid_parent_rest_world_matrix: Matrix,
     intermediate_rest_local_matrix: Matrix,
     intermediate_pose_local_matrix: Matrix,
+    parent_node_rest_pose_world_matrix: Matrix,
 ) -> None:
     armature_data = armature.data
     if not isinstance(armature_data, Armature):
@@ -744,6 +752,26 @@ def assign_humanoid_keyframe(
             begin_translation = end_translation
         if pose_local_translation is None:
             pose_local_translation = begin_translation
+
+        parent_world_scale = parent_node_rest_pose_world_matrix.to_scale()
+        if parent_world_scale.length_squared >= float_info.epsilon:
+            if node_rest_pose_tree.is_root:
+                node_rest_pose_local_translation = Vector((0, 0, 0))
+            else:
+                node_rest_pose_local_translation = (
+                    node_rest_pose_tree.local_matrix.to_translation()
+                )
+            # これはもっと便利な方法がありそう
+            pose_local_translation = Vector(
+                (
+                    (pose_local_translation.x - node_rest_pose_local_translation.x)
+                    / parent_world_scale.x,
+                    (pose_local_translation.y - node_rest_pose_local_translation.y)
+                    / parent_world_scale.y,
+                    (pose_local_translation.z - node_rest_pose_local_translation.z)
+                    / parent_world_scale.z,
+                )
+            )
     else:
         pose_local_translation = node_rest_pose_tree.local_matrix.to_translation()
 
@@ -766,9 +794,12 @@ def assign_humanoid_keyframe(
             begin_timestamp = end_timestamp
             begin_rotation = end_rotation
         if pose_local_rotation is None:
-            pose_local_rotation = begin_rotation
+            pose_local_rotation = (
+                node_rest_pose_tree.local_matrix.to_quaternion().inverted()
+                @ begin_rotation
+            )
     else:
-        pose_local_rotation = node_rest_pose_tree.local_matrix.to_quaternion()
+        pose_local_rotation = Quaternion()
 
     humanoid_rest_world_matrix = humanoid_parent_rest_world_matrix
     rest_local_matrix = (
@@ -880,4 +911,5 @@ def assign_humanoid_keyframe(
             humanoid_rest_world_matrix,
             rest_local_matrix,
             pose_local_matrix,
+            parent_node_rest_pose_world_matrix @ node_rest_pose_tree.local_matrix,
         )

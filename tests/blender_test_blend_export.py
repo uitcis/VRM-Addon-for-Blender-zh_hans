@@ -34,19 +34,39 @@ def test(blend_path_str: str) -> None:
     major_minor = getenv("BLENDER_VRM_BLENDER_MAJOR_MINOR_VERSION") or "unversioned"
 
     blend = Path(blend_path_str)
-    in_path = blend_dir / blend
-    if not in_path.exists():
-        in_path = blend_dir / major_minor / blend
+    in_path_default = blend_dir / blend
+    in_path_versioned = blend_dir / major_minor / blend
+    if in_path_default.exists():
+        in_path = in_path_default
+    elif in_path_versioned.exists():
+        in_path = in_path_versioned
+    else:
+        message = f"No input file:\n{in_path_default}\n{in_path_versioned}\n"
+        raise FileNotFoundError(message)
 
     if blend.name.endswith(".merge.blend"):
         blend = blend.with_suffix("").with_suffix(".blend")
     vrm = blend.with_suffix(".vrm")
     blend_vrm_path = vrm_dir / major_minor / "out" / blend.with_suffix(".blend.vrm")
-    expected_path = blend_vrm_path
-    if not expected_path.exists():
-        expected_path = vrm_dir / major_minor / "out" / vrm
-        if not expected_path.exists():
-            expected_path = vrm_dir / "in" / vrm
+
+    expected_path_blend_vrm = blend_vrm_path
+    expected_path_vrm_out = vrm_dir / major_minor / "out" / vrm
+    expected_path_vrm_in = vrm_dir / "in" / vrm
+    if expected_path_blend_vrm.exists():
+        expected_path = expected_path_blend_vrm
+    elif expected_path_vrm_out.exists():
+        expected_path = expected_path_vrm_out
+    elif expected_path_vrm_in.exists():
+        expected_path = expected_path_vrm_in
+    else:
+        message = (
+            "No expected result file:\n"
+            + f"{expected_path_blend_vrm}\n"
+            + f"{expected_path_vrm_out}\n"
+            + f"{expected_path_vrm_in}\n"
+        )
+        raise FileNotFoundError(message)
+
     temp_vrm_dir = vrm_dir / major_minor / "temp"
     temp_vrm_dir.mkdir(parents=True, exist_ok=True)
 

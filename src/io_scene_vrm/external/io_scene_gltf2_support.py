@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import importlib
-from collections.abc import Set
+from collections.abc import Set as AbstractSet
 
 import bpy
 from bpy.types import Context, Event, Image, Operator
@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 class WM_OT_vrm_io_scene_gltf2_disabled_warning(Operator):
     bl_label = "glTF 2.0 add-on is disabled"
     bl_idname = "wm.vrm_gltf2_addon_disabled_warning"
-    bl_options: Set[str] = {"REGISTER"}
+    bl_options: AbstractSet[str] = {"REGISTER"}
 
     def execute(self, _context: Context) -> set[str]:
         return {"FINISHED"}
@@ -120,6 +120,9 @@ def create_export_settings() -> dict[str, object]:
         "additional_texture_export": [],
         # https://github.com/KhronosGroup/glTF-Blender-IO/blob/2debd75ace303f3a3b00a43e9d7a9507af32f194/addons/io_scene_gltf2/__init__.py#L944
         "additional_texture_export_current_idx": 0,
+        # https://github.com/KhronosGroup/glTF-Blender-IO/blob/2debd75ace303f3a3b00a43e9d7a9507af32f194/addons/io_scene_gltf2/__init__.py#L985-L986
+        "gltf_unused_textures": False,
+        "gltf_unused_images": False,
     }
 
 

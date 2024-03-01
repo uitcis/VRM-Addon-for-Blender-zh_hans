@@ -143,8 +143,7 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
             self.setup_pose(
                 self.armature,
                 self.armature_data,
-                self.armature_data.vrm_addon_extension.vrm0.humanoid.pose_library,
-                self.armature_data.vrm_addon_extension.vrm0.humanoid.pose_marker_name,
+                self.armature_data.vrm_addon_extension.vrm0.humanoid,
             )
             wm.progress_update(1)
             self.image_to_bin()
@@ -562,13 +561,12 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
         normal_texture_scale: Optional[float] = None,
         occlusion_texture: Optional[tuple[str, int, int]] = None,
         emissive_texture: Optional[tuple[str, int, int]] = None,
-        transparent_method: str = "OPAQUE",
+        transparent_method: str = "OPAQUE",  # "OPAQUE","MASK","BLEND"
         transparency_cutoff: Optional[float] = 0.5,
         unlit: Optional[bool] = None,
         double_sided: bool = False,
         texture_transform: Optional["LegacyVrmExporter.KhrTextureTransform"] = None,
     ) -> dict[str, Json]:
-        """transparent_method = {"OPAQUE","MASK","BLEND"}."""
         if base_color is None:
             base_color = [1.0, 1.0, 1.0, 1.0]
         base_color = [max(0.0, min(1.0, v)) for v in base_color]
@@ -719,9 +717,10 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
         sampler_tuple_to_index_dict: dict[tuple[int, int, int, int], int],
         texture_tuple_to_index_dict: dict[tuple[int, int], int],
     ) -> tuple[dict[str, Json], dict[str, Json]]:
-        mtoon_dict: dict[str, Json] = {}
-        mtoon_dict["name"] = material.name
-        mtoon_dict["shader"] = "VRM/MToon"
+        mtoon_dict: dict[str, Json] = {
+            "name": material.name,
+            "shader": "VRM/MToon",
+        }
 
         keyword_map: dict[str, bool] = {}
         tag_map: dict[str, str] = {}
@@ -918,12 +917,13 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
         keyword_map.update({"_ALPHAPREMULTIPLY_ON": False})
 
         mtoon_float_dict["_MToonVersion"] = MtoonUnversioned.version
-        mtoon_float_dict["_CullMode"] = (
-            2 if material.use_backface_culling else 0
-        )  # no cull or bf cull
-        mtoon_float_dict[
-            "_OutlineCullMode"
-        ] = 1  # front face cull (for invert normal outline)
+
+        # no cull or back face cull
+        mtoon_float_dict["_CullMode"] = 2 if material.use_backface_culling else 0
+
+        # front face cull (for invert normal outline)
+        mtoon_float_dict["_OutlineCullMode"] = 1
+
         mtoon_float_dict["_DebugMode"] = 0
         keyword_map.update({"MTOON_DEBUG_NORMAL": False})
         keyword_map.update({"MTOON_DEBUG_LITSHADERATE": False})
@@ -1002,15 +1002,16 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
         sampler_tuple_to_index_dict: dict[tuple[int, int, int, int], int],
         texture_tuple_to_index_dict: dict[tuple[int, int], int],
     ) -> tuple[dict[str, Json], dict[str, Json]]:
-        gltf_dict: dict[str, Json] = {}
-        gltf_dict["name"] = material.name
-        gltf_dict["shader"] = "VRM_USE_GLTFSHADER"
-        gltf_dict["keywordMap"] = {}
-        gltf_dict["tagMap"] = {}
-        gltf_dict["floatProperties"] = {}
-        gltf_dict["vectorProperties"] = {}
-        gltf_dict["textureProperties"] = {}
-        gltf_dict["extras"] = {"VRM_Addon_for_Blender_legacy_gltf_material": {}}
+        gltf_dict: dict[str, Json] = {
+            "name": material.name,
+            "shader": "VRM_USE_GLTFSHADER",
+            "keywordMap": {},
+            "tagMap": {},
+            "floatProperties": {},
+            "vectorProperties": {},
+            "textureProperties": {},
+            "extras": {"VRM_Addon_for_Blender_legacy_gltf_material": {}},
+        }
 
         if material.blend_method == "OPAQUE":
             transparent_method = "OPAQUE"
@@ -1089,15 +1090,16 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
         sampler_tuple_to_index_dict: dict[tuple[int, int, int, int], int],
         texture_tuple_to_index_dict: dict[tuple[int, int], int],
     ) -> tuple[dict[str, Json], dict[str, Json]]:
-        zw_dict: dict[str, Json] = {}
-        zw_dict["name"] = material.name
-        zw_dict["shader"] = "VRM/UnlitTransparentZWrite"
-        zw_dict["renderQueue"] = 2600
-        zw_dict["keywordMap"] = {}
-        zw_dict["tagMap"] = {"RenderType": "Transparent"}
-        zw_dict["floatProperties"] = {}
-        zw_dict["vectorProperties"] = {}
-        zw_dict["textureProperties"] = {}
+        zw_dict: dict[str, Json] = {
+            "name": material.name,
+            "shader": "VRM/UnlitTransparentZWrite",
+            "renderQueue": 2600,
+            "keywordMap": {},
+            "tagMap": {"RenderType": "Transparent"},
+            "floatProperties": {},
+            "vectorProperties": {},
+            "textureProperties": {},
+        }
         color_tex = shader.get_image_name_and_sampler_type(
             transzw_shader_node, "Main_Texture"
         )
@@ -1265,8 +1267,9 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
             {"name": material.name},
         )
 
-        pbr_dict: dict[str, Json] = {}
-        pbr_dict["name"] = material.name
+        pbr_dict: dict[str, Json] = {
+            "name": material.name,
+        }
 
         if bpy.app.version < (3, 6):
             module_name = "io_scene_gltf2.blender.exp.gltf2_blender_gather_materials"
@@ -1616,9 +1619,9 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
         float_properties["_ShadeToony"] = convert.mtoon_shading_toony_1_to_0(
             mtoon.shading_toony_factor, mtoon.shading_shift_factor
         )
-        float_properties[
-            "_IndirectLightIntensity"
-        ] = convert.mtoon_gi_equalization_to_intensity(mtoon.gi_equalization_factor)
+        float_properties["_IndirectLightIntensity"] = (
+            convert.mtoon_gi_equalization_to_intensity(mtoon.gi_equalization_factor)
+        )
         float_properties["_RimLightingMix"] = gltf.mtoon0_rim_lighting_mix
         float_properties["_RimFresnelPower"] = mtoon.parametric_rim_fresnel_power_factor
         float_properties["_RimLift"] = mtoon.parametric_rim_lift_factor
@@ -1792,9 +1795,9 @@ class LegacyVrmExporter(AbstractBaseVrmExporter):
         float_properties["_OutlineCullMode"] = 1
         float_properties["_DebugMode"] = 0
         float_properties["_LightColorAttenuation"] = gltf.mtoon0_light_color_attenuation
-        float_properties[
-            "_OutlineScaledMaxDistance"
-        ] = gltf.mtoon0_outline_scaled_max_distance
+        float_properties["_OutlineScaledMaxDistance"] = (
+            gltf.mtoon0_outline_scaled_max_distance
+        )
 
         keyword_map["MTOON_DEBUG_NORMAL"] = False
         keyword_map["MTOON_DEBUG_LITSHADERATE"] = False

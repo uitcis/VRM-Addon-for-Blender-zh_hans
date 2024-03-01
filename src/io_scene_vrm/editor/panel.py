@@ -1,4 +1,4 @@
-from collections.abc import Set
+from collections.abc import Set as AbstractSet
 
 from bpy.app.translations import pgettext
 from bpy.types import Armature, Context, Operator, Panel
@@ -8,7 +8,7 @@ from ..common.preferences import get_preferences
 from . import (
     detail_mesh_maker,
     make_armature,
-    mesh_from_bone_envelopes,
+    make_mesh_from_bone_envelopes,
     search,
     validation,
 )
@@ -57,7 +57,7 @@ def add_armature(add_armature_op: Operator, _context: Context) -> None:
 def make_mesh(make_mesh_op: Operator, _context: Context) -> None:
     make_mesh_op.layout.separator()
     make_mesh_op.layout.operator(
-        mesh_from_bone_envelopes.ICYP_OT_make_mesh_from_bone_envelopes.bl_idname,
+        make_mesh_from_bone_envelopes.ICYP_OT_make_mesh_from_bone_envelopes.bl_idname,
         text="Mesh from selected armature",
         icon="PLUGIN",
     )
@@ -74,7 +74,7 @@ class VRM_PT_current_selected_armature(Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "VRM"
-    bl_options: Set[str] = {"HIDE_HEADER"}
+    bl_options: AbstractSet[str] = {"HIDE_HEADER"}
 
     @classmethod
     def poll(cls, context: Context) -> bool:
@@ -138,7 +138,7 @@ class VRM_PT_controller_unsupported_blender_version_warning(Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "VRM"
-    bl_options: Set[str] = {"HIDE_HEADER"}
+    bl_options: AbstractSet[str] = {"HIDE_HEADER"}
 
     @classmethod
     def poll(cls, _context: Context) -> bool:

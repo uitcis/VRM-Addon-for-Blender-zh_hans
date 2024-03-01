@@ -129,9 +129,9 @@ def work_in_progress_2(context: Context, armature: Object) -> bytes:
             if parent_bone:
                 break
         if parent_bone:
-            bone_name_to_parent_bone_name_without_non_human_bone[
-                parent_bone.name
-            ] = bone.name
+            bone_name_to_parent_bone_name_without_non_human_bone[parent_bone.name] = (
+                bone.name
+            )
             matrix = parent_bone.matrix.inverted_safe() @ bone.matrix
         else:
             matrix = bone.matrix
@@ -196,9 +196,9 @@ def work_in_progress_2(context: Context, armature: Object) -> bytes:
                 "lookRight",
             ]:
                 continue
-            data_path_to_expression_name[
-                expression.path_from_id("preview")
-            ] = expression.name
+            data_path_to_expression_name[expression.path_from_id("preview")] = (
+                expression.name
+            )
 
         expression_name_to_expression_values: dict[
             str, list[tuple[float, float, float]]
@@ -220,9 +220,9 @@ def work_in_progress_2(context: Context, armature: Object) -> bytes:
                 )
                 if not expression_values:
                     expression_values = []
-                    expression_name_to_expression_values[
-                        expression_name
-                    ] = expression_values
+                    expression_name_to_expression_values[expression_name] = (
+                        expression_values
+                    )
                 expression_values.append(
                     (
                         max(0, min(fcurve.evaluate(frame), 1)),
@@ -645,6 +645,9 @@ def work_in_progress_2(context: Context, armature: Object) -> bytes:
             )
 
             output_accessor_index = len(accessor_dicts)
+            gltf_translation_x_values = [t[0] for t in gltf_translations]
+            gltf_translation_y_values = [t[1] for t in gltf_translations]
+            gltf_translation_z_values = [t[2] for t in gltf_translations]
             accessor_dicts.append(
                 {
                     "bufferView": output_buffer_view_index,
@@ -652,24 +655,14 @@ def work_in_progress_2(context: Context, armature: Object) -> bytes:
                     "count": len(hips_translations),
                     "type": "VEC3",
                     "min": [
-                        min(values)
-                        for values in [
-                            [
-                                gltf_translation[i]
-                                for gltf_translation in gltf_translations
-                            ]
-                            for i in range(3)
-                        ]
+                        min(gltf_translation_x_values),
+                        min(gltf_translation_y_values),
+                        min(gltf_translation_z_values),
                     ],
                     "max": [
-                        max(values)
-                        for values in [
-                            [
-                                gltf_translation[i]
-                                for gltf_translation in gltf_translations
-                            ]
-                            for i in range(3)
-                        ]
+                        max(gltf_translation_x_values),
+                        max(gltf_translation_y_values),
+                        max(gltf_translation_z_values),
                     ],
                 }
             )
@@ -715,6 +708,7 @@ def work_in_progress_2(context: Context, armature: Object) -> bytes:
             "extensionsUsed": ["VRMC_vrm_animation"],
             "extensions": {
                 "VRMC_vrm_animation": {
+                    "specVersion": "1.0",
                     "humanoid": {
                         "humanBones": human_bones_dict,
                     },
