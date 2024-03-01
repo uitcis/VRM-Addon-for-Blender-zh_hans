@@ -359,7 +359,6 @@ classes: list[
     mtoon1_ops.VRM_OT_convert_material_to_mtoon1,
     mtoon1_ops.VRM_OT_convert_mtoon1_to_bsdf_principled,
     mtoon1_ops.VRM_OT_reset_mtoon1_material_shader_node_tree,
-    mtoon1_ops.VRM_OT_update_all_mtoon1_material_node_groups,
     mtoon1_ops.VRM_OT_import_mtoon1_texture_image_file,
     mtoon1_ops.VRM_OT_refresh_mtoon1_outline,
     mtoon1_ops.StoreViewportMatrixOperator,
