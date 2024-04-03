@@ -11,6 +11,7 @@
 !*.rb
 
 !/.clang-format
+!/.devcontainer/**
 !/.editorconfig
 !/.flake8
 !/.gitattributes
@@ -29,6 +30,7 @@
 !/docs/*.pptx
 !/docs/website/**
 !/src/io_scene_vrm/README.txt
+!/src/io_scene_vrm/blender_manifest.toml
 !/src/io_scene_vrm/editor/vroid2vrc_lipsync_recipe.json
 !/poetry.lock
 !/pyproject.toml

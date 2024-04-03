@@ -39,6 +39,7 @@ from ..property_group import (
     MeshObjectPropertyGroup,
     StringPropertyGroup,
 )
+from ..vrm1.property_group import Vrm1HumanoidPropertyGroup
 
 if TYPE_CHECKING:
     from ..property_group import CollectionPropertyProtocol
@@ -124,7 +125,9 @@ class Vrm0HumanoidBonePropertyGroup(PropertyGroup):
         max: Sequence[float]  # type: ignore[no-redef]
         center: Sequence[float]  # type: ignore[no-redef]
         axis_length: float  # type: ignore[no-redef]
-        node_candidates: CollectionPropertyProtocol[StringPropertyGroup]  # type: ignore[no-redef]
+        node_candidates: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            StringPropertyGroup
+        ]
 
 
 # https://github.com/vrm-c/UniVRM/blob/v0.91.1/Assets/VRM/Runtime/Format/glTF_VRM_Humanoid.cs#L166-L195
@@ -164,6 +167,21 @@ class Vrm0HumanoidPropertyGroup(PropertyGroup):
     has_translation_dof: BoolProperty(  # type: ignore[valid-type]
         name="Has Translation DoF",
         default=False,
+    )
+
+    POSE_ITEM_VALUE_REST_POSITION_POSE = (
+        Vrm1HumanoidPropertyGroup.POSE_ITEM_VALUE_REST_POSITION_POSE
+    )
+    POSE_ITEM_VALUE_CURRENT_POSE = (
+        Vrm1HumanoidPropertyGroup.POSE_ITEM_VALUE_CURRENT_POSE
+    )
+    POSE_ITEM_VALUE_CUSTOM_POSE = Vrm1HumanoidPropertyGroup.POSE_ITEM_VALUE_CUSTOM_POSE
+
+    pose: bpy.props.EnumProperty(  # type: ignore[valid-type]
+        items=Vrm1HumanoidPropertyGroup.pose_items,
+        name="T-Pose",
+        description="T-Pose",
+        default=POSE_ITEM_VALUE_CURRENT_POSE,
     )
 
     # for T-Pose
@@ -312,7 +330,9 @@ class Vrm0HumanoidPropertyGroup(PropertyGroup):
     if TYPE_CHECKING:
         # This code is auto generated.
         # `poetry run python tools/property_typing.py`
-        human_bones: CollectionPropertyProtocol[Vrm0HumanoidBonePropertyGroup]  # type: ignore[no-redef]
+        human_bones: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            Vrm0HumanoidBonePropertyGroup
+        ]
         arm_stretch: float  # type: ignore[no-redef]
         leg_stretch: float  # type: ignore[no-redef]
         upper_arm_twist: float  # type: ignore[no-redef]
@@ -321,9 +341,12 @@ class Vrm0HumanoidPropertyGroup(PropertyGroup):
         lower_leg_twist: float  # type: ignore[no-redef]
         feet_spacing: float  # type: ignore[no-redef]
         has_translation_dof: bool  # type: ignore[no-redef]
+        pose: str  # type: ignore[no-redef]
         pose_library: Optional[Action]  # type: ignore[no-redef]
         pose_marker_name: str  # type: ignore[no-redef]
-        last_bone_names: CollectionPropertyProtocol[StringPropertyGroup]  # type: ignore[no-redef]
+        last_bone_names: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            StringPropertyGroup
+        ]
         initial_automatic_bone_assignment: bool  # type: ignore[no-redef]
 
 
@@ -451,7 +474,9 @@ class Vrm0FirstPersonPropertyGroup(PropertyGroup):
         # `poetry run python tools/property_typing.py`
         first_person_bone: BonePropertyGroup  # type: ignore[no-redef]
         first_person_bone_offset: Sequence[float]  # type: ignore[no-redef]
-        mesh_annotations: CollectionPropertyProtocol[Vrm0MeshAnnotationPropertyGroup]  # type: ignore[no-redef]
+        mesh_annotations: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            Vrm0MeshAnnotationPropertyGroup
+        ]
         look_at_type_name: str  # type: ignore[no-redef]
         look_at_horizontal_inner: Vrm0DegreeMapPropertyGroup  # type: ignore[no-redef]
         look_at_horizontal_outer: Vrm0DegreeMapPropertyGroup  # type: ignore[no-redef]
@@ -503,7 +528,9 @@ class Vrm0MaterialValueBindPropertyGroup(PropertyGroup):
         # `poetry run python tools/property_typing.py`
         material: Optional[Material]  # type: ignore[no-redef]
         property_name: str  # type: ignore[no-redef]
-        target_value: CollectionPropertyProtocol[FloatPropertyGroup]  # type: ignore[no-redef]
+        target_value: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            FloatPropertyGroup
+        ]
 
 
 # https://github.com/vrm-c/UniVRM/blob/v0.91.1/Assets/VRM/Runtime/Format/glTF_VRM_BlendShape.cs#L62-L99
@@ -644,8 +671,12 @@ class Vrm0BlendShapeGroupPropertyGroup(PropertyGroup):
         # `poetry run python tools/property_typing.py`
         name: str  # type: ignore[no-redef]
         preset_name: str  # type: ignore[no-redef]
-        binds: CollectionPropertyProtocol[Vrm0BlendShapeBindPropertyGroup]  # type: ignore[no-redef]
-        material_values: CollectionPropertyProtocol[Vrm0MaterialValueBindPropertyGroup]  # type: ignore[no-redef]
+        binds: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            Vrm0BlendShapeBindPropertyGroup
+        ]
+        material_values: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            Vrm0MaterialValueBindPropertyGroup
+        ]
         is_binary: bool  # type: ignore[no-redef]
         active_bind_index: int  # type: ignore[no-redef]
         active_material_value_index: int  # type: ignore[no-redef]
@@ -841,8 +872,12 @@ class Vrm0SecondaryAnimationGroupPropertyGroup(PropertyGroup):
         drag_force: float  # type: ignore[no-redef]
         center: BonePropertyGroup  # type: ignore[no-redef]
         hit_radius: float  # type: ignore[no-redef]
-        bones: CollectionPropertyProtocol[BonePropertyGroup]  # type: ignore[no-redef]
-        collider_groups: CollectionPropertyProtocol[StringPropertyGroup]  # type: ignore[no-redef]
+        bones: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            BonePropertyGroup
+        ]
+        collider_groups: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            StringPropertyGroup
+        ]
         show_expanded: bool  # type: ignore[no-redef]
         show_expanded_bones: bool  # type: ignore[no-redef]
         show_expanded_collider_groups: bool  # type: ignore[no-redef]
@@ -995,7 +1030,9 @@ class Vrm0BlendShapeMasterPropertyGroup(PropertyGroup):
     if TYPE_CHECKING:
         # This code is auto generated.
         # `poetry run python tools/property_typing.py`
-        blend_shape_groups: CollectionPropertyProtocol[Vrm0BlendShapeGroupPropertyGroup]  # type: ignore[no-redef]
+        blend_shape_groups: CollectionPropertyProtocol[  # type: ignore[no-redef]
+            Vrm0BlendShapeGroupPropertyGroup
+        ]
         active_blend_shape_group_index: int  # type: ignore[no-redef]
 
 

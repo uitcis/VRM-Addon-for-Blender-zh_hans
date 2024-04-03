@@ -157,7 +157,12 @@ jobs:
           curl -sSL https://install.python-poetry.org | python3 -
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install poetry dependencies
-        run: poetry install
+        run: |
+          for _ in $(seq 5); do
+            if poetry install; then
+              break
+            fi
+          done
       - name: Check source code formatting
         run: |
           ./tools/format.sh
@@ -179,7 +184,6 @@ jobs:
           VALIDATE_HTML: false
           VALIDATE_JSCPD: false
           VALIDATE_PYTHON_BLACK: false
-          VALIDATE_PYTHON_FLAKE8: false
           VALIDATE_PYTHON_ISORT: false
           VALIDATE_PYTHON_PYLINT: false
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
