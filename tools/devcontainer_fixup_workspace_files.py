@@ -1,4 +1,9 @@
 #!/usr/bin/python3
+"""devcontainerの作業フォルダの所有者とパーミッションを正しい値に戻す.
+
+このスクリプトはrootで実行する。rootの権限は強力すぎるため、
+poetryは経由せずOSのパッケージのみを用いて実行する。
+"""
 
 import functools
 import grp
@@ -6,6 +11,7 @@ import logging
 import os
 import pwd
 import stat
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -19,6 +25,10 @@ else:
     tqdm: TypeAlias = type_checking_tqdm.tqdm  # noqa: PYI042
 
 logger = logging.getLogger(__name__)
+
+
+if sys.platform == "win32":
+    raise NotImplementedError
 
 
 def print_path_walk_error(warning_messages: list[str], os_error: OSError) -> None:
@@ -169,7 +179,7 @@ def fixup_files(warning_messages: list[str], progress: tqdm) -> None:
 
 def main() -> None:
     warning_messages: list[str] = []
-    with tqdm(unit="files", ascii=" =") as progress:
+    with tqdm(unit="files", ascii=" =", dynamic_ncols=True) as progress:
         fixup_files(warning_messages, progress)
     for index, warning_message in enumerate(warning_messages):
         if index > 5:

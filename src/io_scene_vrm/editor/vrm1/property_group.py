@@ -29,6 +29,7 @@ from bpy.types import (
 )
 from mathutils import Matrix, Quaternion, Vector
 
+from ...common.char import DISABLE_TRANSLATION
 from ...common.logging import get_logger
 from ...common.vrm1.human_bone import (
     HumanBoneName,
@@ -608,8 +609,7 @@ class Vrm1LookAtPropertyGroup(PropertyGroup):
         (TYPE_VALUE_BONE, "Bone", "Bone", "BONE_DATA", 0),
         (
             TYPE_VALUE_EXPRESSION,
-            # Use \N{ZERO WIDTH SPACE} to disable translation
-            "Expression\N{ZERO WIDTH SPACE}",
+            "Expression" + DISABLE_TRANSLATION,
             "Expression",
             "SHAPEKEY_DATA",
             1,
@@ -946,12 +946,16 @@ class Vrm1FirstPersonPropertyGroup(PropertyGroup):
         type=Vrm1MeshAnnotationPropertyGroup,
     )
 
+    # for UI
+    active_mesh_annotation_index: IntProperty(min=0)  # type: ignore[valid-type]
+
     if TYPE_CHECKING:
         # This code is auto generated.
         # `poetry run python tools/property_typing.py`
         mesh_annotations: CollectionPropertyProtocol[  # type: ignore[no-redef]
             Vrm1MeshAnnotationPropertyGroup
         ]
+        active_mesh_annotation_index: int  # type: ignore[no-redef]
 
 
 # https://github.com/vrm-c/vrm-specification/blob/6fb6baaf9b9095a84fb82c8384db36e1afeb3558/specification/VRMC_vrm-1.0-beta/schema/VRMC_vrm.expressions.expression.morphTargetBind.schema.json
@@ -1174,9 +1178,9 @@ class Vrm1ExpressionPropertyGroup(PropertyGroup):
         set=set_preview,
     )
 
-    active_morph_target_bind_index: IntProperty()  # type: ignore[valid-type]
-    active_material_color_bind_index: IntProperty()  # type: ignore[valid-type]
-    active_texture_transform_bind_index: IntProperty()  # type: ignore[valid-type]
+    active_morph_target_bind_index: IntProperty(min=0)  # type: ignore[valid-type]
+    active_material_color_bind_index: IntProperty(min=0)  # type: ignore[valid-type]
+    active_texture_transform_bind_index: IntProperty(min=0)  # type: ignore[valid-type]
 
     if TYPE_CHECKING:
         # This code is auto generated.
@@ -1357,7 +1361,7 @@ class Vrm1ExpressionsPropertyGroup(PropertyGroup):
     expression_ui_list_elements: CollectionProperty(  # type: ignore[valid-type]
         type=StringPropertyGroup
     )
-    active_expression_ui_list_element_index: IntProperty()  # type: ignore[valid-type]
+    active_expression_ui_list_element_index: IntProperty(min=0)  # type: ignore[valid-type]
 
     if TYPE_CHECKING:
         # This code is auto generated.
@@ -1472,6 +1476,10 @@ class Vrm1MetaPropertyGroup(PropertyGroup):
         name="Other License URL"
     )
 
+    # for UI
+    active_author_index: IntProperty(min=0)  # type: ignore[valid-type]
+    active_reference_index: IntProperty(min=0)  # type: ignore[valid-type]
+
     if TYPE_CHECKING:
         # This code is auto generated.
         # `poetry run python tools/property_typing.py`
@@ -1497,6 +1505,8 @@ class Vrm1MetaPropertyGroup(PropertyGroup):
         allow_redistribution: bool  # type: ignore[no-redef]
         modification: str  # type: ignore[no-redef]
         other_license_url: str  # type: ignore[no-redef]
+        active_author_index: int  # type: ignore[no-redef]
+        active_reference_index: int  # type: ignore[no-redef]
 
 
 # https://github.com/vrm-c/vrm-specification/blob/6fb6baaf9b9095a84fb82c8384db36e1afeb3558/specification/VRMC_vrm-1.0-beta/schema/VRMC_vrm.schema.json

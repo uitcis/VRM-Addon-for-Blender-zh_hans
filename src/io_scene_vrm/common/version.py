@@ -1,30 +1,31 @@
+import platform
 from dataclasses import dataclass
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
+from importlib import import_module
 from sys import float_info
 from typing import Optional
 
 import bpy
 from bpy.app.translations import pgettext
 
+from .blender_manifest import BlenderManifest
 from .logging import get_logger
 
 logger = get_logger(__name__)
-
-MAX_SUPPORTED_BLENDER_MAJOR_MINOR_VERSION = (4, 1)
 
 
 @dataclass
 class Cache:
     use: bool
     last_blender_restart_required: bool
-    last_root_init_py_modification_time: float
+    last_blender_manifest_modification_time: float
+    initial_blender_manifest_content: bytes
 
 
 cache = Cache(
     use=False,
     last_blender_restart_required=False,
-    last_root_init_py_modification_time=0.0,
+    last_blender_manifest_modification_time=0.0,
+    initial_blender_manifest_content=BlenderManifest.default_blender_manifest_path().read_bytes(),
 )
 
 
@@ -39,22 +40,20 @@ def trigger_clear_addon_version_cache() -> None:
     bpy.app.timers.register(clear_addon_version_cache, first_interval=0.5)
 
 
+def max_supported_blender_major_minor_version() -> tuple[int, int]:
+    blender_version_max = BlenderManifest.read().blender_version_max
+    return (blender_version_max[0], blender_version_max[1])
+
+
 def addon_version() -> tuple[int, int, int]:
-    # To avoid circular reference call __import__() in the function local scope.
-    v = __import__(".".join(__name__.split(".")[:-2])).bl_info.get("version")
-    if (
-        not isinstance(v, tuple)
-        or len(v) != 3
-        or not isinstance(v[0], int)
-        or not isinstance(v[1], int)
-        or not isinstance(v[2], int)
-    ):
-        message = f"{v} is not valid type but {type(v)}"
-        raise AssertionError(message)
-    return (v[0], v[1], v[2])
+    return BlenderManifest.read().version
 
 
 def blender_restart_required() -> bool:
+    if not legacy_addon():
+        # Blender Extensions Platform correctly reloads extensions
+        return False
+
     if cache.use:
         return cache.last_blender_restart_required
 
@@ -63,47 +62,50 @@ def blender_restart_required() -> bool:
     if cache.last_blender_restart_required:
         return True
 
-    root_init_py_path = Path(__file__).parent.parent / "__init__.py"
-    root_init_py_modification_time = Path(root_init_py_path).stat().st_mtime
+    blender_manifest_path = BlenderManifest.default_blender_manifest_path()
+    blender_manifest_modification_time = blender_manifest_path.stat().st_mtime
     if (
-        abs(cache.last_root_init_py_modification_time - root_init_py_modification_time)
+        abs(
+            cache.last_blender_manifest_modification_time
+            - blender_manifest_modification_time
+        )
         < float_info.epsilon
     ):
         return False
 
-    cache.last_root_init_py_modification_time = root_init_py_modification_time
+    cache.last_blender_manifest_modification_time = blender_manifest_modification_time
 
-    spec = spec_from_file_location(
-        "blender_vrm_addon_root_init_py_version_checking",
-        root_init_py_path,
-    )
-    if spec is None:
-        return False
-    mod = module_from_spec(spec)
-    if spec.loader is None:
-        return False
-    spec.loader.exec_module(mod)
-
-    bl_info = getattr(mod, "bl_info", None)
-    if not isinstance(bl_info, dict):
-        return False
-    bl_info_version = bl_info.get("version")
-    if bl_info_version == addon_version():
+    blender_manifest_content = blender_manifest_path.read_bytes()
+    if blender_manifest_content == cache.initial_blender_manifest_content:
         return False
 
     cache.last_blender_restart_required = True
     return True
 
 
+def legacy_addon() -> bool:
+    root_module = import_module(".".join(__name__.split(".")[:-2]))
+    bl_info = getattr(root_module, "bl_info", None)
+    if not isinstance(bl_info, dict):
+        return False
+    return bl_info.get("name") == "VRM format"
+
+
 def stable_release() -> bool:
-    return bpy.app.version_cycle in [
-        "release",
-        "rc",  # Windowsストアは3.3.11や3.6.3をRC版のままリリースしている
-    ]
+    # for Blender Extensions Platform
+    if not legacy_addon() and bpy.app.version == (4, 2, 0):
+        return True
+    if bpy.app.version_cycle == "release":
+        return True
+    if platform.system() == "Windows" and bpy.app.version_cycle == "rc":
+        # Microsoft Store distributes RC versions of 3.3.11 and 3.6.3 as
+        # release versions.
+        return True
+    return False
 
 
 def supported() -> bool:
-    return bpy.app.version[:2] <= MAX_SUPPORTED_BLENDER_MAJOR_MINOR_VERSION
+    return bpy.app.version[:2] <= max_supported_blender_major_minor_version()
 
 
 def preferences_warning_message() -> Optional[str]:

@@ -1,5 +1,5 @@
-import datetime
 from dataclasses import dataclass
+from decimal import Decimal
 from sys import float_info
 from typing import Optional, Union
 
@@ -17,14 +17,23 @@ from .property_group import (
 
 @dataclass
 class State:
-    previous_datetime: Optional[datetime.datetime] = None
+    frame_count: Decimal = Decimal()
+    spring_bone_60_fps_update_count: Decimal = Decimal()
+    last_fps: Optional[Decimal] = None
+    last_fps_base: Optional[Decimal] = None
+
+    def reset(self) -> None:
+        self.frame_count = Decimal()
+        self.spring_bone_60_fps_update_count = Decimal()
+        self.last_fps_base = Decimal(bpy.context.scene.render.fps_base)
+        self.last_fps = Decimal(bpy.context.scene.render.fps)
 
 
 state = State()
 
 
 def reset_state() -> None:
-    state.previous_datetime = None
+    state.reset()
 
 
 @dataclass(frozen=True)
@@ -490,11 +499,50 @@ def calculate_joint_pair_head_pose_bone_rotations(
 
 @persistent
 def depsgraph_update_pre(_dummy: object) -> None:
-    state.previous_datetime = None
+    state.reset()
 
 
 @persistent
 def frame_change_pre(_dummy: object) -> None:
-    state.previous_datetime = datetime.datetime.now(datetime.timezone.utc)
-    delta_time = bpy.context.scene.render.fps_base / float(bpy.context.scene.render.fps)
-    update_pose_bone_rotations(delta_time)
+    fps = Decimal(bpy.context.scene.render.fps)
+    last_fps = state.last_fps
+    fps_base = Decimal(bpy.context.scene.render.fps_base)
+    last_fps_base = state.last_fps_base
+    if (
+        last_fps_base is None
+        or (fps_base - last_fps_base).copy_abs() > 0.00001
+        or fps != last_fps
+    ):
+        state.reset()
+
+    state.frame_count += 1
+
+    # 現在時刻が次回のSpringBoneの計算時刻よりも未来なら、SpringBoneを動かす
+    # 浮動小数点の丸め誤差を最小限にするため、共通の分母を分子に掛け算することで
+    # 少数の扱いを最小限にしている
+    frame_time_x_60_x_fps = state.frame_count * Decimal(60) * fps_base
+    while True:
+        next_spring_bone_60_fps_update_count = (
+            state.spring_bone_60_fps_update_count + Decimal(1)
+        )
+
+        next_spring_bone_update_time_x_60_x_fps = (
+            next_spring_bone_60_fps_update_count * fps
+        )
+        if next_spring_bone_update_time_x_60_x_fps > frame_time_x_60_x_fps:
+            break
+
+        # floatの丸め誤差の積算を行うため、delta_timeは 1.0/60.0 を決め打ちせず
+        # 前後の時刻の差分を使う
+        next_spring_bone_update_time = next_spring_bone_60_fps_update_count / Decimal(
+            60.0
+        )
+        current_spring_bone_update_time = (
+            state.spring_bone_60_fps_update_count / Decimal(60.0)
+        )
+        delta_time = float(next_spring_bone_update_time) - float(
+            current_spring_bone_update_time
+        )
+        update_pose_bone_rotations(delta_time)
+
+        state.spring_bone_60_fps_update_count += 1

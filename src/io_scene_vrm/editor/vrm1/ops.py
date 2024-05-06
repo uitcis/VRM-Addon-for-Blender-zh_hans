@@ -32,7 +32,10 @@ class VRM_OT_add_vrm1_meta_author(Operator):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
-        armature_data.vrm_addon_extension.vrm1.meta.authors.add()
+        meta = armature_data.vrm_addon_extension.vrm1.meta
+        author = meta.authors.add()
+        author.value = ""
+        meta.active_author_index = len(meta.authors) - 1
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -62,10 +65,86 @@ class VRM_OT_remove_vrm1_meta_author(Operator):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
-        authors = armature_data.vrm_addon_extension.vrm1.meta.authors
-        if len(authors) <= self.author_index:
+        meta = armature_data.vrm_addon_extension.vrm1.meta
+        if len(meta.authors) <= self.author_index:
             return {"CANCELLED"}
-        authors.remove(self.author_index)
+        meta.authors.remove(self.author_index)
+        meta.active_author_index = min(
+            meta.active_author_index,
+            max(0, len(meta.authors) - 1),
+        )
+        return {"FINISHED"}
+
+    if TYPE_CHECKING:
+        # This code is auto generated.
+        # `poetry run python tools/property_typing.py`
+        armature_name: str  # type: ignore[no-redef]
+        author_index: int  # type: ignore[no-redef]
+
+
+class VRM_OT_move_up_vrm1_meta_author(Operator):
+    bl_idname = "vrm.move_up_vrm1_meta_author"
+    bl_label = "Move Up Author"
+    bl_description = "Move Up VRM 1.0 Meta Author"
+    bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
+
+    armature_name: StringProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+    )
+    author_index: IntProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+        min=0,
+    )
+
+    def execute(self, _context: Context) -> set[str]:
+        armature = bpy.data.objects.get(self.armature_name)
+        if armature is None or armature.type != "ARMATURE":
+            return {"CANCELLED"}
+        armature_data = armature.data
+        if not isinstance(armature_data, Armature):
+            return {"CANCELLED"}
+        meta = armature_data.vrm_addon_extension.vrm1.meta
+        if len(meta.authors) <= self.author_index:
+            return {"CANCELLED"}
+        new_index = (self.author_index - 1) % len(meta.authors)
+        meta.authors.move(self.author_index, new_index)
+        meta.active_author_index = new_index
+        return {"FINISHED"}
+
+    if TYPE_CHECKING:
+        # This code is auto generated.
+        # `poetry run python tools/property_typing.py`
+        armature_name: str  # type: ignore[no-redef]
+        author_index: int  # type: ignore[no-redef]
+
+
+class VRM_OT_move_down_vrm1_meta_author(Operator):
+    bl_idname = "vrm.move_down_vrm1_meta_author"
+    bl_label = "Move Down Author"
+    bl_description = "Move Down VRM 1.0 Meta Author"
+    bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
+
+    armature_name: StringProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+    )
+    author_index: IntProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+        min=0,
+    )
+
+    def execute(self, _context: Context) -> set[str]:
+        armature = bpy.data.objects.get(self.armature_name)
+        if armature is None or armature.type != "ARMATURE":
+            return {"CANCELLED"}
+        armature_data = armature.data
+        if not isinstance(armature_data, Armature):
+            return {"CANCELLED"}
+        meta = armature_data.vrm_addon_extension.vrm1.meta
+        if len(meta.authors) <= self.author_index:
+            return {"CANCELLED"}
+        new_index = (self.author_index + 1) % len(meta.authors)
+        meta.authors.move(self.author_index, new_index)
+        meta.active_author_index = new_index
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -92,7 +171,10 @@ class VRM_OT_add_vrm1_meta_reference(Operator):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
-        armature_data.vrm_addon_extension.vrm1.meta.references.add()
+        meta = armature_data.vrm_addon_extension.vrm1.meta
+        reference = meta.references.add()
+        reference.value = ""
+        meta.active_reference_index = len(meta.references) - 1
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -122,10 +204,86 @@ class VRM_OT_remove_vrm1_meta_reference(Operator):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
-        references = armature_data.vrm_addon_extension.vrm1.meta.references
-        if len(references) <= self.reference_index:
+        meta = armature_data.vrm_addon_extension.vrm1.meta
+        if len(meta.references) <= self.reference_index:
             return {"CANCELLED"}
-        references.remove(self.reference_index)
+        meta.references.remove(self.reference_index)
+        meta.active_reference_index = min(
+            meta.active_reference_index,
+            max(0, len(meta.references) - 1),
+        )
+        return {"FINISHED"}
+
+    if TYPE_CHECKING:
+        # This code is auto generated.
+        # `poetry run python tools/property_typing.py`
+        armature_name: str  # type: ignore[no-redef]
+        reference_index: int  # type: ignore[no-redef]
+
+
+class VRM_OT_move_up_vrm1_meta_reference(Operator):
+    bl_idname = "vrm.move_up_vrm1_meta_reference"
+    bl_label = "Move Up Reference"
+    bl_description = "Move Up VRM 1.0 Meta Reference"
+    bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
+
+    armature_name: StringProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+    )
+    reference_index: IntProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+        min=0,
+    )
+
+    def execute(self, _context: Context) -> set[str]:
+        armature = bpy.data.objects.get(self.armature_name)
+        if armature is None or armature.type != "ARMATURE":
+            return {"CANCELLED"}
+        armature_data = armature.data
+        if not isinstance(armature_data, Armature):
+            return {"CANCELLED"}
+        meta = armature_data.vrm_addon_extension.vrm1.meta
+        if len(meta.references) <= self.reference_index:
+            return {"CANCELLED"}
+        new_index = (self.reference_index - 1) % len(meta.references)
+        meta.references.move(self.reference_index, new_index)
+        meta.active_reference_index = new_index
+        return {"FINISHED"}
+
+    if TYPE_CHECKING:
+        # This code is auto generated.
+        # `poetry run python tools/property_typing.py`
+        armature_name: str  # type: ignore[no-redef]
+        reference_index: int  # type: ignore[no-redef]
+
+
+class VRM_OT_move_down_vrm1_meta_reference(Operator):
+    bl_idname = "vrm.move_down_vrm1_meta_reference"
+    bl_label = "Move Down Reference"
+    bl_description = "Move Down VRM 1.0 Meta Reference"
+    bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
+
+    armature_name: StringProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+    )
+    reference_index: IntProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+        min=0,
+    )
+
+    def execute(self, _context: Context) -> set[str]:
+        armature = bpy.data.objects.get(self.armature_name)
+        if armature is None or armature.type != "ARMATURE":
+            return {"CANCELLED"}
+        armature_data = armature.data
+        if not isinstance(armature_data, Armature):
+            return {"CANCELLED"}
+        meta = armature_data.vrm_addon_extension.vrm1.meta
+        if len(meta.references) <= self.reference_index:
+            return {"CANCELLED"}
+        new_index = (self.reference_index + 1) % len(meta.references)
+        meta.references.move(self.reference_index, new_index)
+        meta.active_reference_index = new_index
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -157,22 +315,11 @@ class VRM_OT_add_vrm1_expressions_custom_expression(Operator):
             return {"CANCELLED"}
         expressions = armature_data.vrm_addon_extension.vrm1.expressions
         new_last_custom_index = len(expressions.custom)
-        new_active_custom_index = min(
-            max(
-                0,
-                expressions.active_expression_ui_list_element_index
-                - len(expressions.preset.name_to_expression_dict())
-                + 1,
-            ),
-            new_last_custom_index,
-        )
         custom_expression = expressions.custom.add()
         custom_expression.custom_name = self.custom_expression_name
         expressions.active_expression_ui_list_element_index = (
-            len(expressions.preset.name_to_expression_dict()) + new_active_custom_index
+            len(expressions.preset.name_to_expression_dict()) + new_last_custom_index
         )
-        if new_last_custom_index != new_active_custom_index:
-            expressions.custom.move(new_last_custom_index, new_active_custom_index)
         return bpy.ops.vrm.update_vrm1_expression_ui_list_elements()
 
     if TYPE_CHECKING:
@@ -329,7 +476,11 @@ class VRM_OT_add_vrm1_first_person_mesh_annotation(Operator):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
-        armature_data.vrm_addon_extension.vrm1.first_person.mesh_annotations.add()
+        first_person = armature_data.vrm_addon_extension.vrm1.first_person
+        first_person.mesh_annotations.add()
+        first_person.active_mesh_annotation_index = (
+            len(first_person.mesh_annotations) - 1
+        )
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -359,12 +510,90 @@ class VRM_OT_remove_vrm1_first_person_mesh_annotation(Operator):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
-        mesh_annotations = (
-            armature_data.vrm_addon_extension.vrm1.first_person.mesh_annotations
-        )
-        if len(mesh_annotations) <= self.mesh_annotation_index:
+        first_person = armature_data.vrm_addon_extension.vrm1.first_person
+        if len(first_person.mesh_annotations) <= self.mesh_annotation_index:
             return {"CANCELLED"}
-        mesh_annotations.remove(self.mesh_annotation_index)
+        first_person.mesh_annotations.remove(self.mesh_annotation_index)
+        first_person.active_mesh_annotation_index = min(
+            first_person.active_mesh_annotation_index,
+            max(0, len(first_person.mesh_annotations) - 1),
+        )
+        return {"FINISHED"}
+
+    if TYPE_CHECKING:
+        # This code is auto generated.
+        # `poetry run python tools/property_typing.py`
+        armature_name: str  # type: ignore[no-redef]
+        mesh_annotation_index: int  # type: ignore[no-redef]
+
+
+class VRM_OT_move_up_vrm1_first_person_mesh_annotation(Operator):
+    bl_idname = "vrm.move_up_vrm1_first_person_mesh_annotation"
+    bl_label = "Move Up Mesh Annotation"
+    bl_description = "Move Up VRM 1.0 First Person Mesh Annotation"
+    bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
+
+    armature_name: StringProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+    )
+    mesh_annotation_index: IntProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+        min=0,
+    )
+
+    def execute(self, _context: Context) -> set[str]:
+        armature = bpy.data.objects.get(self.armature_name)
+        if armature is None or armature.type != "ARMATURE":
+            return {"CANCELLED"}
+        armature_data = armature.data
+        if not isinstance(armature_data, Armature):
+            return {"CANCELLED"}
+        first_person = armature_data.vrm_addon_extension.vrm1.first_person
+        if len(first_person.mesh_annotations) <= self.mesh_annotation_index:
+            return {"CANCELLED"}
+        new_index = (self.mesh_annotation_index - 1) % len(
+            first_person.mesh_annotations
+        )
+        first_person.mesh_annotations.move(self.mesh_annotation_index, new_index)
+        first_person.active_mesh_annotation_index = new_index
+        return {"FINISHED"}
+
+    if TYPE_CHECKING:
+        # This code is auto generated.
+        # `poetry run python tools/property_typing.py`
+        armature_name: str  # type: ignore[no-redef]
+        mesh_annotation_index: int  # type: ignore[no-redef]
+
+
+class VRM_OT_move_down_vrm1_first_person_mesh_annotation(Operator):
+    bl_idname = "vrm.move_down_vrm1_first_person_mesh_annotation"
+    bl_label = "Move Down Mesh Annotation"
+    bl_description = "Move Down VRM 1.0 First Person Mesh Annotation"
+    bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
+
+    armature_name: StringProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+    )
+    mesh_annotation_index: IntProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"},
+        min=0,
+    )
+
+    def execute(self, _context: Context) -> set[str]:
+        armature = bpy.data.objects.get(self.armature_name)
+        if armature is None or armature.type != "ARMATURE":
+            return {"CANCELLED"}
+        armature_data = armature.data
+        if not isinstance(armature_data, Armature):
+            return {"CANCELLED"}
+        first_person = armature_data.vrm_addon_extension.vrm1.first_person
+        if len(first_person.mesh_annotations) <= self.mesh_annotation_index:
+            return {"CANCELLED"}
+        new_index = (self.mesh_annotation_index + 1) % len(
+            first_person.mesh_annotations
+        )
+        first_person.mesh_annotations.move(self.mesh_annotation_index, new_index)
+        first_person.active_mesh_annotation_index = new_index
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -399,9 +628,8 @@ class VRM_OT_add_vrm1_expression_morph_target_bind(Operator):
         if expression is None:
             return {"CANCELLED"}
         expression.morph_target_binds.add()
-        expression.active_morph_target_bind_index = min(
-            max(0, expression.active_morph_target_bind_index + 1),
-            len(expression.morph_target_binds) - 1,
+        expression.active_morph_target_bind_index = (
+            len(expression.morph_target_binds) - 1
         )
         return {"FINISHED"}
 
@@ -445,7 +673,7 @@ class VRM_OT_remove_vrm1_expression_morph_target_bind(Operator):
         expression.morph_target_binds.remove(self.bind_index)
         expression.active_morph_target_bind_index = min(
             expression.active_morph_target_bind_index,
-            len(expression.morph_target_binds) - 1,
+            max(0, len(expression.morph_target_binds) - 1),
         )
         return {"FINISHED"}
 
@@ -569,9 +797,10 @@ class VRM_OT_add_vrm1_expression_material_color_bind(Operator):
         )
         if expression is None:
             return {"CANCELLED"}
-        new_active_index = len(expression.material_color_binds)
         expression.material_color_binds.add()
-        expression.active_material_color_bind_index = new_active_index
+        expression.active_material_color_bind_index = (
+            len(expression.material_color_binds) - 1
+        )
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -612,8 +841,9 @@ class VRM_OT_remove_vrm1_expression_material_color_bind(Operator):
         if len(expression.material_color_binds) <= self.bind_index:
             return {"CANCELLED"}
         expression.material_color_binds.remove(self.bind_index)
-        expression.active_material_color_bind_index = max(
-            0, len(expression.material_color_binds) - 1
+        expression.active_material_color_bind_index = min(
+            expression.active_material_color_bind_index,
+            max(0, len(expression.material_color_binds) - 1),
         )
         return {"FINISHED"}
 
@@ -735,9 +965,10 @@ class VRM_OT_add_vrm1_expression_texture_transform_bind(Operator):
         expression = expressions.all_name_to_expression_dict().get(self.expression_name)
         if expression is None:
             return {"CANCELLED"}
-        active_index = len(expression.texture_transform_binds)
         expression.texture_transform_binds.add()
-        expression.active_texture_transform_bind_index = active_index
+        expression.active_texture_transform_bind_index = (
+            len(expression.texture_transform_binds) - 1
+        )
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -778,8 +1009,9 @@ class VRM_OT_remove_vrm1_expression_texture_transform_bind(Operator):
         if len(expression.texture_transform_binds) <= self.bind_index:
             return {"CANCELLED"}
         expression.texture_transform_binds.remove(self.bind_index)
-        expression.active_texture_transform_bind_index = max(
-            0, len(expression.texture_transform_binds) - 1
+        expression.active_texture_transform_bind_index = min(
+            expression.active_texture_transform_bind_index,
+            max(0, len(expression.texture_transform_binds) - 1),
         )
         return {"FINISHED"}
 

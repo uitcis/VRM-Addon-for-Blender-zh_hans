@@ -24,6 +24,8 @@
 !/LICENSE
 !/LICENSE.*
 !/Notice.txt
+!/extension.patch
+!/extension_userpref.blend
 !/dictionary.txt
 !/docs/*.jpg
 !/docs/*.png

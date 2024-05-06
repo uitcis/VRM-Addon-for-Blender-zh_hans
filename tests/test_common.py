@@ -2,8 +2,8 @@ import tempfile
 from pathlib import Path
 from unittest import TestCase
 
-from io_scene_vrm import bl_info
 from io_scene_vrm.common import deep, version
+from io_scene_vrm.common.blender_manifest import BlenderManifest
 from io_scene_vrm.common.fs import (
     create_unique_indexed_directory_path,
     create_unique_indexed_file_path,
@@ -16,8 +16,26 @@ class TestVersion(TestCase):
     def test_version(self) -> None:
         self.assertEqual(
             version.addon_version(),
-            bl_info.get("version"),
+            (2, 20, 38),
         )
+
+
+class TestBlenderManifest(TestCase):
+    def test_read_default(self) -> None:
+        blender_manifest = BlenderManifest.read()
+        self.assertEqual(blender_manifest.blender_version_max[0], 4)
+
+    def test_read(self) -> None:
+        text = (
+            "foo = bar\n"
+            + 'version = "1.23.456"\n'
+            + 'blender_version_min = "9.8.7"\n'
+            + 'blender_version_max = "12.34.56"\n'
+        )
+        blender_manifest = BlenderManifest.read(text)
+        self.assertEqual(blender_manifest.version, (1, 23, 456))
+        self.assertEqual(blender_manifest.blender_version_min, (9, 8, 7))
+        self.assertEqual(blender_manifest.blender_version_max, (12, 34, 56))
 
 
 class TestDeep(TestCase):
