@@ -1,5 +1,7 @@
 import math
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 from os import environ
 from pathlib import Path
@@ -23,12 +25,15 @@ from mathutils import Matrix, Quaternion, Vector
 
 from ..common import convert, deep, shader
 from ..common.char import INTERNAL_NAME_PREFIX
-from ..common.deep import Json, make_json
+from ..common.convert import Json
+from ..common.deep import make_json
 from ..common.gltf import pack_glb, parse_glb
 from ..common.logging import get_logger
 from ..common.version import addon_version
 from ..common.vrm1.human_bone import HumanBoneName
+from ..common.workspace import save_workspace
 from ..editor import search
+from ..editor.extension import get_armature_extension, get_material_extension
 from ..editor.mtoon1.property_group import (
     Mtoon1SamplerPropertyGroup,
     Mtoon1TextureInfoPropertyGroup,
@@ -54,11 +59,12 @@ from .abstract_base_vrm_exporter import AbstractBaseVrmExporter, assign_dict
 logger = get_logger(__name__)
 
 
-class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
+class Vrm1Exporter(AbstractBaseVrmExporter):
     def __init__(
         self,
         context: Context,
         export_objects: list[Object],
+        *,
         export_all_influences: bool,
         export_lights: bool,
     ) -> None:
@@ -79,7 +85,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             message = f"{type(armature_data)} is not an Armature"
             raise TypeError(message)
 
-        for collider in armature_data.vrm_addon_extension.spring_bone1.colliders:
+        for collider in get_armature_extension(armature_data).spring_bone1.colliders:
             if not collider.bpy_object:
                 continue
             if collider.bpy_object in self.export_objects:
@@ -98,35 +104,37 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         self.extras_material_name_key = (
             INTERNAL_NAME_PREFIX + self.export_id + "MaterialName"
         )
-        self.object_visibility_and_selection: dict[str, tuple[bool, bool]] = {}
-        self.mounted_object_names: list[str] = []
 
-    def overwrite_object_visibility_and_selection(self) -> None:
-        self.object_visibility_and_selection.clear()
+    @contextmanager
+    def overwrite_object_visibility_and_selection(self) -> Iterator[None]:
+        object_visibility_and_selection: dict[str, tuple[bool, bool]] = {}
         # https://projects.blender.org/blender/blender/issues/113378
         self.context.view_layer.update()
         for obj in self.context.view_layer.objects:
-            self.object_visibility_and_selection[obj.name] = (
+            object_visibility_and_selection[obj.name] = (
                 obj.hide_get(),
                 obj.select_get(),
             )
             enabled = obj in self.export_objects
             obj.hide_set(not enabled)
             obj.select_set(enabled)
+        try:
+            yield
+        finally:
+            for object_name, (
+                hidden,
+                selection,
+            ) in object_visibility_and_selection.items():
+                restore_obj = self.context.blend_data.objects.get(object_name)
+                if restore_obj:
+                    restore_obj.hide_set(hidden)
+                    restore_obj.select_set(selection)
 
-    def restore_object_visibility_and_selection(self) -> None:
-        for object_name, (
-            hidden,
-            selection,
-        ) in self.object_visibility_and_selection.items():
-            obj = bpy.data.objects.get(object_name)
-            if obj:
-                obj.hide_set(hidden)
-                obj.select_set(selection)
-
-    def mount_skinned_mesh_parent(self) -> None:
+    @contextmanager
+    def mount_skinned_mesh_parent(self) -> Iterator[None]:
         armature = self.armature
         if not armature:
+            yield
             return
 
         # Blender 3.1.2付属アドオンのglTF 2.0エクスポート処理には次の条件をすべて満たす
@@ -136,6 +144,8 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         # - スキニングされたボーンの子供に別のメッシュが存在する
         # そのため、アーマチュアの子孫になっていないメッシュの先祖の親をアーマチュアに
         # し、後で戻す
+        mounted_object_names: list[str] = []
+
         for obj in self.export_objects:
             if obj.type != "MESH" or not [
                 True
@@ -149,77 +159,22 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                 if search_obj.parent:
                     search_obj = search_obj.parent
                     continue
-                self.mounted_object_names.append(search_obj.name)
+                mounted_object_names.append(search_obj.name)
                 matrix_world = search_obj.matrix_world.copy()
                 search_obj.parent = armature
                 search_obj.matrix_world = matrix_world
                 break
 
-    def restore_skinned_mesh_parent(self) -> None:
-        for mounted_object_name in self.mounted_object_names:
-            obj = bpy.data.objects.get(mounted_object_name)
-            if not obj:
-                continue
-            matrix_world = obj.matrix_world.copy()
-            obj.parent = None
-            obj.matrix_world = matrix_world
-
-    def create_dummy_skinned_mesh_object(self) -> str:
-        vertices = []
-        edges = []
-        faces = []
-        for index, _ in enumerate(self.armature.pose.bones):
-            vertices.extend(
-                [
-                    (index / 16.0, 0, 0),
-                    ((index + 1) / 16.0, 0, 1 / 16.0),
-                    ((index + 1) / 16.0, 0, 0),
-                ]
-            )
-            edges.extend(
-                [
-                    (index * 3 + 0, index * 3 + 1),
-                    (index * 3 + 1, index * 3 + 2),
-                    (index * 3 + 2, index * 3 + 0),
-                ]
-            )
-            faces.append((index * 3, index * 3 + 1, index * 3 + 2))
-
-        armature_data = self.armature.data
-        if not isinstance(armature_data, Armature):
-            message = f"{type(armature_data)} is not an Armature"
-            raise TypeError(message)
-
-        mesh = bpy.data.meshes.new(self.export_id + "_mesh")
-        mesh.from_pydata(vertices, edges, faces)
-        mesh.update()
-        if mesh.validate():
-            message = "Invalid geometry"
-            raise ValueError(message)
-        obj = bpy.data.objects.new("secondary", mesh)
-        obj.parent_type = "OBJECT"
-        obj.parent = self.armature
-        for index, bone_name in enumerate(armature_data.bones.keys()):
-            vertex_group = obj.vertex_groups.new(name=bone_name)
-            vertex_group.add([index * 3, index * 3 + 1, index * 3 + 2], 1.0, "ADD")
-        modifier = obj.modifiers.new(name="Armature", type="ARMATURE")
-        if not isinstance(modifier, ArmatureModifier):
-            message = f"{type(modifier)} is not a ArmatureModifier"
-            raise TypeError(message)
-        modifier.object = self.armature
-        self.context.scene.collection.objects.link(obj)
-        obj[self.extras_object_name_key] = obj.name
-        return str(obj.name)
-
-    def destroy_dummy_skinned_mesh_object(self, name: str) -> None:
-        dummy_skinned_mesh_object = bpy.data.objects.get(name)
-        if not isinstance(dummy_skinned_mesh_object, Object):
-            return
-        dummy_skinned_mesh_object.modifiers.clear()
-        dummy_skinned_mesh_object.vertex_groups.clear()
-        self.context.scene.collection.objects.unlink(  # TODO: remove completely
-            dummy_skinned_mesh_object
-        )
+        try:
+            yield
+        finally:
+            for mounted_object_name in mounted_object_names:
+                restore_obj = self.context.blend_data.objects.get(mounted_object_name)
+                if not restore_obj:
+                    continue
+                matrix_world = restore_obj.matrix_world.copy()
+                restore_obj.parent = None
+                restore_obj.matrix_world = matrix_world
 
     @classmethod
     def create_meta_dict(
@@ -479,7 +434,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         bone_name_to_index_dict: dict[str, int],
     ) -> tuple[list[Json], dict[str, int]]:
         collider_dicts: list[Json] = []
-        collider_uuid_to_index_dict = {}
+        collider_uuid_to_index_dict: dict[str, int] = {}
         for collider in spring_bone.colliders:
             collider_dict: dict[str, Json] = {}
             node_index = bone_name_to_index_dict.get(collider.node.bone_name)
@@ -518,7 +473,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         collider_uuid_to_index_dict: dict[str, int],
     ) -> tuple[list[Json], dict[str, int]]:
         collider_group_dicts: list[Json] = []
-        collider_group_uuid_to_index_dict = {}
+        collider_group_uuid_to_index_dict: dict[str, int] = {}
         for collider_group in spring_bone.collider_groups:
             collider_group_dict: dict[str, Json] = {"name": collider_group.vrm_name}
             collider_indices: list[Json] = []
@@ -553,7 +508,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         spring_dicts: list[Json] = []
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
-            logger.error(f"{type(armature_data)} is not an Armature")
+            logger.error("%s is not an Armature", type(armature_data))
             return []
         for spring in spring_bone.springs:
             spring_dict: dict[str, Json] = {"name": spring.vrm_name}
@@ -773,7 +728,9 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             image_dicts = []
             json_dict["images"] = image_dicts
         if isinstance(image_index, int) and not 0 <= image_index < len(image_dicts):
-            logger.error(f"Bug: not 0 <= {image_index} < len(images)) for {image.name}")
+            logger.error(
+                "Bug: not 0 <= %d < len(images)) for %s", image_index, image.name
+            )
             image_index = None
         if not isinstance(image_index, int):
             image_index = len(image_dicts)
@@ -802,7 +759,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         image_name_to_index_dict: dict[str, int],
         gltf2_addon_export_settings: dict[str, object],
     ) -> Optional[dict[str, Json]]:
-        image = texture_info.index.source
+        image = texture_info.index.get_connected_node_image()
         if not image:
             return None
 
@@ -879,6 +836,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
     @classmethod
     def create_mtoon0_texture_info_dict(
         cls,
+        context: Context,
         json_dict: dict[str, Json],
         body_binary: bytearray,
         node: Node,
@@ -897,7 +855,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             json_dict,
             body_binary,
             image_name_to_index_dict,
-            bpy.data.images[image_name],
+            context.blend_data.images[image_name],
             gltf2_addon_export_settings,
         )
 
@@ -952,10 +910,6 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         }
 
     @classmethod
-    def lerp(cls, a: float, b: float, t: float) -> float:
-        return (1 - t) * a + t * b
-
-    @classmethod
     def create_mtoon1_material_dict(
         cls,
         json_dict: dict[str, Json],
@@ -981,7 +935,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             "specVersion": "1.0",
         }
 
-        gltf = material.vrm_addon_extension.mtoon1
+        gltf = get_material_extension(material).mtoon1
         mtoon = gltf.extensions.vrmc_materials_mtoon
 
         extensions_dict: dict[str, Json] = {
@@ -1149,6 +1103,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
     @classmethod
     def create_legacy_gltf_material_dict(
         cls,
+        context: Context,
         json_dict: dict[str, Json],
         body_binary: bytearray,
         material: Material,
@@ -1175,6 +1130,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             shader.get_rgba_value(node, "base_Color", 0.0, 1.0),
         )
         base_color_texture_dict = cls.create_mtoon0_texture_info_dict(
+            context,
             json_dict,
             body_binary,
             node,
@@ -1202,6 +1158,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             pbr_metallic_roughness_dict,
             "metallicRoughnessTexture",
             cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1212,6 +1169,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         )
 
         normal_texture_dict = cls.create_mtoon0_texture_info_dict(
+            context,
             json_dict,
             body_binary,
             node,
@@ -1230,6 +1188,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             material_dict,
             "emissiveTexture",
             cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1243,6 +1202,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             material_dict,
             "occlusionTexture",
             cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1272,6 +1232,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
     @classmethod
     def create_legacy_transparent_zwrite_material_dict(
         cls,
+        context: Context,
         json_dict: dict[str, Json],
         body_binary: bytearray,
         material: Material,
@@ -1313,6 +1274,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             material_dict, "doubleSided", not material.use_backface_culling, False
         )
         base_color_texture_dict = cls.create_mtoon0_texture_info_dict(
+            context,
             json_dict,
             body_binary,
             node,
@@ -1338,6 +1300,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
     @classmethod
     def create_mtoon_unversioned_material_dict(
         cls,
+        context: Context,
         json_dict: dict[str, Json],
         body_binary: bytearray,
         material: Material,
@@ -1402,6 +1365,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             shader.get_rgba_value(node, "DiffuseColor", 0.0, 1.0),
         )
         base_color_texture_dict = cls.create_mtoon0_texture_info_dict(
+            context,
             json_dict,
             body_binary,
             node,
@@ -1418,6 +1382,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             shader.get_rgb_value(node, "ShadeColor", 0.0, 1.0),
         )
         shade_multiply_texture_dict = cls.create_mtoon0_texture_info_dict(
+            context,
             json_dict,
             body_binary,
             node,
@@ -1431,6 +1396,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             # https://github.com/vrm-c/UniVRM/blob/f3479190c330ec6ecd2b40be919285aa93a53aff/Assets/VRM10/Runtime/Migration/Materials/MigrationMToonMaterial.cs#L185-L204
             mtoon_dict["shadeMultiplyTexture"] = base_color_texture_dict
         normal_texture_dict = cls.create_mtoon0_texture_info_dict(
+            context,
             json_dict,
             body_binary,
             node,
@@ -1440,6 +1406,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         )
         if not normal_texture_dict:
             normal_texture_dict = cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1485,6 +1452,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             material_dict,
             "emissiveTexture",
             cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1497,6 +1465,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             mtoon_dict,
             "matcapTexture",
             cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1526,6 +1495,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             mtoon_dict,
             "rimMultiplyTexture",
             cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1568,6 +1538,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             mtoon_dict,
             "outlineWidthMultiplyTexture",
             cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1600,6 +1571,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             mtoon_dict,
             "uvAnimationMaskTexture",
             cls.create_mtoon0_texture_info_dict(
+                context,
                 json_dict,
                 body_binary,
                 node,
@@ -1637,6 +1609,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
     @classmethod
     def save_vrm_materials(
         cls,
+        context: Context,
         json_dict: dict[str, Json],
         body_binary: bytearray,
         material_name_to_index_dict: dict[str, int],
@@ -1649,13 +1622,13 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             json_dict["materials"] = material_dicts
 
         for material_name, index in material_name_to_index_dict.items():
-            material = bpy.data.materials.get(material_name)
+            material = context.blend_data.materials.get(material_name)
             if not isinstance(material, Material) or not (
                 0 <= index < len(material_dicts)
             ):
                 continue
 
-            if material.vrm_addon_extension.mtoon1.enabled:
+            if get_material_extension(material).mtoon1.enabled:
                 material_dicts[index] = cls.create_mtoon1_material_dict(
                     json_dict,
                     body_binary,
@@ -1666,12 +1639,12 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                 continue
 
             # MToon_unversioned (MToon for VRM 0.0)
-            node = search.vrm_shader_node(material)
+            node, vrm_shader_name = search.vrm_shader_node(material)
             if not isinstance(node, Node):
                 continue
-            shader_name = node.node_tree.get("SHADER")
-            if shader_name == "MToon_unversioned":
+            if vrm_shader_name == "MToon_unversioned":
                 material_dicts[index] = cls.create_mtoon_unversioned_material_dict(
+                    context,
                     json_dict,
                     body_binary,
                     material,
@@ -1679,8 +1652,9 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                     image_name_to_index_dict,
                     gltf2_addon_export_settings,
                 )
-            elif shader_name == "GLTF":
+            elif vrm_shader_name == "GLTF":
                 material_dicts[index] = cls.create_legacy_gltf_material_dict(
+                    context,
                     json_dict,
                     body_binary,
                     material,
@@ -1688,9 +1662,10 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                     image_name_to_index_dict,
                     gltf2_addon_export_settings,
                 )
-            elif shader_name == "TRANSPARENT_ZWRITE":
+            elif vrm_shader_name == "TRANSPARENT_ZWRITE":
                 material_dicts[index] = (
                     cls.create_legacy_transparent_zwrite_material_dict(
+                        context,
                         json_dict,
                         body_binary,
                         material,
@@ -1704,28 +1679,31 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             json_dict["materials"] = material_dicts
 
     @classmethod
-    def disable_mtoon1_material_nodes(cls) -> list[str]:
-        disabled_material_names = []
-        for material in bpy.data.materials:
+    @contextmanager
+    def disable_mtoon1_material_nodes(cls, context: Context) -> Iterator[None]:
+        disabled_material_names: list[str] = []
+        for material in context.blend_data.materials:
             if not material:
                 continue
-            if material.vrm_addon_extension.mtoon1.enabled and material.use_nodes:
+            if get_material_extension(material).mtoon1.enabled and material.use_nodes:
                 material.use_nodes = False
                 disabled_material_names.append(material.name)
-        return disabled_material_names
-
-    @classmethod
-    def restore_mtoon1_material_nodes(cls, disabled_material_names: list[str]) -> None:
-        for disabled_material_name in disabled_material_names:
-            material = bpy.data.materials.get(disabled_material_name)
-            if not material:
-                continue
-            if not material.use_nodes:
-                material.use_nodes = True
+        try:
+            yield
+        finally:
+            for disabled_material_name in disabled_material_names:
+                disabled_material = context.blend_data.materials.get(
+                    disabled_material_name
+                )
+                if not disabled_material:
+                    continue
+                if not disabled_material.use_nodes:
+                    disabled_material.use_nodes = True
 
     @classmethod
     def unassign_normal_from_mtoon_primitive_morph_target(
         cls,
+        context: Context,
         json_dict: dict[str, Json],
         material_name_to_index_dict: dict[str, int],
     ) -> None:
@@ -1752,18 +1730,18 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                 ) in material_name_to_index_dict.items():
                     if material_index != search_material_index:
                         continue
-                    material = bpy.data.materials.get(search_material_name)
+                    material = context.blend_data.materials.get(search_material_name)
                     if not material:
                         continue
-                    if material.vrm_addon_extension.mtoon1.export_shape_key_normals:
+                    if get_material_extension(material).mtoon1.export_shape_key_normals:
                         continue
-                    if material.vrm_addon_extension.mtoon1.enabled:
+                    if get_material_extension(material).mtoon1.enabled:
                         skip = False
                         break
-                    node = search.vrm_shader_node(material)
+                    node, vrm_shader_name = search.vrm_shader_node(material)
                     if not node:
                         continue
-                    if node.node_tree["SHADER"] == "MToon_unversioned":
+                    if vrm_shader_name == "MToon_unversioned":
                         skip = False
                         break
                 if skip:
@@ -1778,16 +1756,18 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                     target_dict.pop("NORMAL", None)
 
     @classmethod
+    @contextmanager
     def setup_dummy_human_bones(
         cls,
         context: Context,
         armature: Object,
         armature_data: Armature,
-    ) -> Optional[dict[HumanBoneName, str]]:
-        ext = armature_data.vrm_addon_extension
+    ) -> Iterator[None]:
+        ext = get_armature_extension(armature_data)
         human_bones = ext.vrm1.humanoid.human_bones
         if human_bones.all_required_bones_are_assigned():
-            return None
+            yield
+            return
 
         human_bone_name_to_bone_name: dict[HumanBoneName, str] = {}
         for (
@@ -1799,11 +1779,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             human_bone_name_to_bone_name[human_bone_name] = human_bone.node.bone_name
             human_bone.node.set_bone_name(None)
 
-        previous_active = context.view_layer.objects.active
-        try:
-            context.view_layer.objects.active = armature
-            bpy.ops.object.mode_set(mode="EDIT")
-
+        with save_workspace(context, armature, mode="EDIT"):
             hips_bone = armature_data.edit_bones.new(HumanBoneName.HIPS.value)
             hips_bone.head = Vector((0, 0, 0.5))
             hips_bone.tail = Vector((0, 1, 0.5))
@@ -1912,15 +1888,10 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             head_bone.tail = Vector((0, 1, 0.75))
             head_bone.parent = spine_bone
             head_bone_name = deepcopy(head_bone.name)
-        finally:
-            if (
-                context.view_layer.objects.active
-                and context.view_layer.objects.active.mode != "OBJECT"
-            ):
-                bpy.ops.object.mode_set(mode="OBJECT")
-            context.view_layer.objects.active = previous_active
 
-        Vrm1HumanBonesPropertyGroup.update_all_node_candidates(armature_data.name)
+        Vrm1HumanBonesPropertyGroup.update_all_node_candidates(
+            context, armature_data.name
+        )
 
         human_bones.head.node.bone_name = head_bone_name
         human_bones.spine.node.bone_name = spine_bone_name
@@ -1942,52 +1913,68 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         human_bones.left_lower_leg.node.bone_name = left_lower_leg_bone_name
         human_bones.left_foot.node.bone_name = left_foot_bone_name
 
-        return human_bone_name_to_bone_name
-
-    @classmethod
-    def restore_dummy_human_bones(
-        cls,
-        context: Context,
-        armature: Object,
-        armature_data: Armature,
-        human_bone_name_to_bone_name: dict[HumanBoneName, str],
-    ) -> None:
-        ext = armature_data.vrm_addon_extension
-        human_bones = ext.vrm1.humanoid.human_bones
-
-        human_bone_name_to_human_bone = human_bones.human_bone_name_to_human_bone()
-        dummy_bone_names = deepcopy(
-            [
-                human_bone.node.bone_name
-                for human_bone in human_bone_name_to_human_bone.values()
-                if human_bone.node.bone_name
-            ]
-        )
-
-        for human_bone_name, human_bone in human_bone_name_to_human_bone.items():
-            bone_name = human_bone_name_to_bone_name.get(human_bone_name)
-            if bone_name:
-                human_bone.node.set_bone_name(bone_name)
-            else:
-                human_bone.node.set_bone_name(None)
-        Vrm1HumanBonesPropertyGroup.update_all_node_candidates(armature_data.name)
-
-        previous_active = context.view_layer.objects.active
         try:
-            context.view_layer.objects.active = armature
-            bpy.ops.object.mode_set(mode="EDIT")
-
-            for dummy_bone_name in dummy_bone_names:
-                dummy_edit_bone = armature_data.edit_bones.get(dummy_bone_name)
-                if dummy_edit_bone:
-                    armature_data.edit_bones.remove(dummy_edit_bone)
+            yield
         finally:
-            if (
-                context.view_layer.objects.active
-                and context.view_layer.objects.active.mode != "OBJECT"
-            ):
-                bpy.ops.object.mode_set(mode="OBJECT")
-            context.view_layer.objects.active = previous_active
+            human_bones = ext.vrm1.humanoid.human_bones
+
+            human_bone_name_to_human_bone = human_bones.human_bone_name_to_human_bone()
+            dummy_bone_names = deepcopy(
+                [
+                    human_bone.node.bone_name
+                    for human_bone in human_bone_name_to_human_bone.values()
+                    if human_bone.node.bone_name
+                ]
+            )
+
+            for human_bone_name, human_bone in human_bone_name_to_human_bone.items():
+                bone_name = human_bone_name_to_bone_name.get(human_bone_name)
+                if bone_name:
+                    human_bone.node.set_bone_name(bone_name)
+                else:
+                    human_bone.node.set_bone_name(None)
+            Vrm1HumanBonesPropertyGroup.update_all_node_candidates(
+                context, armature_data.name
+            )
+            with save_workspace(context, armature, mode="EDIT"):
+                for dummy_bone_name in dummy_bone_names:
+                    dummy_edit_bone = armature_data.edit_bones.get(dummy_bone_name)
+                    if dummy_edit_bone:
+                        armature_data.edit_bones.remove(dummy_edit_bone)
+
+    @contextmanager
+    def assign_export_custom_properties(
+        self, armature_data: Armature
+    ) -> Iterator[None]:
+        self.armature[self.extras_main_armature_key] = True
+        # 他glTF2ExportUserExtensionの影響を最小化するため、
+        # 影響が少ないと思われるカスタムプロパティを使って
+        # Blenderのオブジェクトとインデックスの対応をとる。
+        for obj in self.context.blend_data.objects:
+            obj[self.extras_object_name_key] = obj.name
+        for material in self.context.blend_data.materials:
+            material[self.extras_material_name_key] = material.name
+
+        # glTF 2.0アドオンのコメントにはPoseBoneとのカスタムプロパティを保存すると
+        # 書いてあるが、実際にはBoneのカスタムプロパティを参照している。
+        # そのため、いちおう両方に書いておく
+        for pose_bone in self.armature.pose.bones:
+            pose_bone[self.extras_bone_name_key] = pose_bone.name
+        for bone in armature_data.bones:
+            bone[self.extras_bone_name_key] = bone.name
+
+        try:
+            yield
+        finally:
+            for pose_bone in self.armature.pose.bones:
+                pose_bone.pop(self.extras_bone_name_key, None)
+            for bone in armature_data.bones:
+                bone.pop(self.extras_bone_name_key, None)
+            for obj in self.context.blend_data.objects:
+                obj.pop(self.extras_object_name_key, None)
+            self.armature.pop(self.extras_main_armature_key, None)
+            for material in self.context.blend_data.materials:
+                material.pop(self.extras_material_name_key, None)
 
     def export_vrm(self) -> Optional[bytes]:
         init_extras_export()
@@ -1997,42 +1984,23 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             message = f"{type(armature_data)} is not an Armature"
             raise TypeError(message)
 
-        vrm = armature_data.vrm_addon_extension.vrm1
-        backup_human_bone_name_to_bone_name = self.setup_dummy_human_bones(
-            self.context, self.armature, armature_data
-        )
-        # dummy_skinned_mesh_object_name = self.create_dummy_skinned_mesh_object()
-        object_name_to_modifier_name = self.hide_mtoon1_outline_geometry_nodes()
-        blend_shape_previews = self.clear_blend_shape_proxy_previews(armature_data)
-        disabled_mtoon1_material_names = []
-        try:
-            self.setup_pose(
-                self.armature,
-                armature_data,
-                vrm.humanoid,
-            )
+        self.setup_mtoon_gltf_fallback_nodes(self.context, is_vrm0=False)
 
-            self.armature[self.extras_main_armature_key] = True
-            # 他glTF2ExportUserExtensionの影響を最小化するため、
-            # 影響が少ないと思われるカスタムプロパティを使って
-            # Blenderのオブジェクトとインデックスの対応をとる。
-            for obj in bpy.data.objects:
-                obj[self.extras_object_name_key] = obj.name
-            for material in bpy.data.materials:
-                material[self.extras_material_name_key] = material.name
-
-            # glTF 2.0アドオンのコメントにはPoseBoneとのカスタムプロパティを保存すると
-            # 書いてあるが、実際にはBoneのカスタムプロパティを参照している。
-            # そのため、いちおう両方に書いておく
-            for pose_bone in self.armature.pose.bones:
-                pose_bone[self.extras_bone_name_key] = pose_bone.name
-            for bone in armature_data.bones:
-                bone[self.extras_bone_name_key] = bone.name
-
-            self.overwrite_object_visibility_and_selection()
-            self.mount_skinned_mesh_parent()
-            disabled_mtoon1_material_names = self.disable_mtoon1_material_nodes()
-            with tempfile.TemporaryDirectory() as temp_dir:
+        vrm = get_armature_extension(armature_data).vrm1
+        with (
+            save_workspace(self.context),
+            self.setup_dummy_human_bones(self.context, self.armature, armature_data),
+            self.clear_blend_shape_proxy_previews(armature_data),
+            self.setup_pose(self.armature, armature_data, vrm.humanoid),
+            self.overwrite_object_visibility_and_selection(),
+        ):
+            with (
+                self.hide_mtoon1_outline_geometry_nodes(self.context),
+                self.disable_mtoon1_material_nodes(self.context),
+                self.mount_skinned_mesh_parent(),
+                self.assign_export_custom_properties(armature_data),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
                 filepath = Path(temp_dir, "out.glb")
                 export_scene_gltf_result = export_scene_gltf(
                     ExportSceneGltfArguments(
@@ -2065,24 +2033,21 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                     )
                     raise AssertionError(message)
                 extra_name_assigned_glb = filepath.read_bytes()
-        finally:
-            self.restore_mtoon1_material_nodes(disabled_mtoon1_material_names)
-            for pose_bone in self.armature.pose.bones:
-                pose_bone.pop(self.extras_bone_name_key, None)
-            for bone in armature_data.bones:
-                bone.pop(self.extras_bone_name_key, None)
-            for obj in bpy.data.objects:
-                obj.pop(self.extras_object_name_key, None)
-            self.armature.pop(self.extras_main_armature_key, None)
-            for material in bpy.data.materials:
-                material.pop(self.extras_material_name_key, None)
+            vrm_bytes = self.add_vrm_extension_to_glb(extra_name_assigned_glb)
+            if vrm_bytes is None:
+                return None
+            logger.info("Generated VRM size: %s bytes", len(vrm_bytes))
+        return vrm_bytes
 
-            self.restore_object_visibility_and_selection()
-            self.restore_skinned_mesh_parent()
-            # self.destroy_dummy_skinned_mesh_object(dummy_skinned_mesh_object_name)
-            self.restore_mtoon1_outline_geometry_nodes(object_name_to_modifier_name)
-            self.restore_pose(self.armature, armature_data)
-            self.restore_blend_shape_proxy_previews(armature_data, blend_shape_previews)
+    def add_vrm_extension_to_glb(
+        self, extra_name_assigned_glb: bytes
+    ) -> Optional[bytes]:
+        armature_data = self.armature.data
+        if not isinstance(armature_data, Armature):
+            message = f"{type(armature_data)} is not an Armature"
+            raise TypeError(message)
+
+        vrm = get_armature_extension(armature_data).vrm1
 
         json_dict, body_binary = parse_glb(extra_name_assigned_glb)
         body_binary = bytearray(body_binary)
@@ -2325,6 +2290,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
                 material_dict.pop("extras", None)
 
         self.save_vrm_materials(
+            self.context,
             json_dict,
             body_binary,
             material_name_to_index_dict,
@@ -2332,7 +2298,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             self.gltf2_addon_export_settings,
         )
         self.unassign_normal_from_mtoon_primitive_morph_target(
-            json_dict, material_name_to_index_dict
+            self.context, json_dict, material_name_to_index_dict
         )
 
         extensions_used = json_dict.get("extensionsUsed")
@@ -2349,7 +2315,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
 
         extensions_used.append("VRMC_vrm")
         extensions["VRMC_vrm"] = {
-            "specVersion": armature_data.vrm_addon_extension.spec_version,
+            "specVersion": get_armature_extension(armature_data).spec_version,
             "meta": self.create_meta_dict(
                 vrm.meta,
                 json_dict,
@@ -2372,7 +2338,7 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
             ),
         }
 
-        spring_bone = armature_data.vrm_addon_extension.spring_bone1
+        spring_bone = get_armature_extension(armature_data).spring_bone1
         spring_bone_dict: dict[str, Json] = {}
 
         (
@@ -2441,14 +2407,6 @@ class Gltf2AddonVrmExporter(AbstractBaseVrmExporter):
         for key in gltf_root_non_empty_array_keys:
             if not json_dict.get(key):
                 json_dict.pop(key, None)
-
-        if backup_human_bone_name_to_bone_name is not None:
-            self.restore_dummy_human_bones(
-                self.context,
-                self.armature,
-                armature_data,
-                backup_human_bone_name_to_bone_name,
-            )
 
         return pack_glb(json_dict, body_binary)
 

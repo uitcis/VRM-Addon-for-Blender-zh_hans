@@ -17,7 +17,7 @@ from bpy.types import (
 )
 from bpy_extras.io_utils import ExportHelper
 
-from ..common import version
+from ..common import ops, version
 from ..common.logging import get_logger
 from ..common.preferences import (
     copy_export_preferences,
@@ -25,6 +25,7 @@ from ..common.preferences import (
     get_preferences,
 )
 from ..editor import search, validation
+from ..editor.extension import get_armature_extension
 from ..editor.ops import VRM_OT_open_url_in_web_browser, layout_operator
 from ..editor.property_group import CollectionPropertyProtocol, StringPropertyGroup
 from ..editor.validation import VrmValidationError
@@ -41,8 +42,8 @@ from ..editor.vrm1.panel import (
 )
 from ..editor.vrm1.property_group import Vrm1HumanBonesPropertyGroup
 from .abstract_base_vrm_exporter import AbstractBaseVrmExporter
-from .gltf2_addon_vrm_exporter import Gltf2AddonVrmExporter
-from .legacy_vrm_exporter import LegacyVrmExporter
+from .vrm0_exporter import Vrm0Exporter
+from .vrm1_exporter import Vrm1Exporter
 from .vrm_animation_exporter import VrmAnimationExporter
 
 logger = get_logger(__name__)
@@ -134,7 +135,7 @@ class EXPORT_SCENE_OT_vrm(Operator, ExportHelper):
         if self.use_addon_preferences:
             copy_export_preferences(source=get_preferences(context), destination=self)
 
-        if bpy.ops.vrm.model_validate(
+        if ops.vrm.model_validate(
             "INVOKE_DEFAULT",
             show_successful_message=False,
             armature_object_name=self.armature_object_name,
@@ -152,29 +153,29 @@ class EXPORT_SCENE_OT_vrm(Operator, ExportHelper):
         export_objects = search.export_objects(
             context,
             self.armature_object_name,
-            self.export_invisibles,
-            self.export_only_selections,
-            self.export_lights,
+            export_invisibles=self.export_invisibles,
+            export_only_selections=self.export_only_selections,
+            export_lights=self.export_lights,
         )
         is_vrm1 = any(
             obj.type == "ARMATURE"
             and isinstance(obj.data, Armature)
-            and obj.data.vrm_addon_extension.is_vrm1()
+            and get_armature_extension(obj.data).is_vrm1()
             for obj in export_objects
         )
 
         if is_vrm1:
-            vrm_exporter: AbstractBaseVrmExporter = Gltf2AddonVrmExporter(
+            vrm_exporter: AbstractBaseVrmExporter = Vrm1Exporter(
                 context,
                 export_objects,
-                self.export_all_influences,
-                self.export_lights,
+                export_all_influences=self.export_all_influences,
+                export_lights=self.export_lights,
             )
         else:
-            vrm_exporter = LegacyVrmExporter(
+            vrm_exporter = Vrm0Exporter(
                 context,
                 export_objects,
-                export_fb_ngon_encoding,
+                export_fb_ngon_encoding=export_fb_ngon_encoding,
             )
 
         vrm_bin = vrm_exporter.export_vrm()
@@ -188,69 +189,71 @@ class EXPORT_SCENE_OT_vrm(Operator, ExportHelper):
         copy_export_preferences(source=get_preferences(context), destination=self)
 
         if "gltf" not in dir(bpy.ops.export_scene):
-            return bpy.ops.wm.vrm_gltf2_addon_disabled_warning(
+            return ops.wm.vrm_gltf2_addon_disabled_warning(
                 "INVOKE_DEFAULT",
             )
 
         export_objects = search.export_objects(
             context,
             self.armature_object_name,
-            self.export_invisibles,
-            self.export_only_selections,
-            self.export_lights,
+            export_invisibles=self.export_invisibles,
+            export_only_selections=self.export_only_selections,
+            export_lights=self.export_lights,
         )
 
         armatures = [obj for obj in export_objects if obj.type == "ARMATURE"]
         if len(armatures) > 1:
-            return bpy.ops.wm.vrm_export_armature_selection("INVOKE_DEFAULT")
+            return ops.wm.vrm_export_armature_selection("INVOKE_DEFAULT")
         if len(armatures) == 1:
             armature = armatures[0]
             armature_data = armature.data
             if not isinstance(armature_data, Armature):
                 pass
-            elif armature_data.vrm_addon_extension.is_vrm0():
+            elif get_armature_extension(armature_data).is_vrm0():
                 Vrm0HumanoidPropertyGroup.fixup_human_bones(armature)
-                Vrm0HumanoidPropertyGroup.update_all_node_candidates(armature_data.name)
-                humanoid = armature_data.vrm_addon_extension.vrm0.humanoid
+                Vrm0HumanoidPropertyGroup.update_all_node_candidates(
+                    context, armature_data.name
+                )
+                humanoid = get_armature_extension(armature_data).vrm0.humanoid
                 if all(
                     b.node.bone_name not in b.node_candidates
                     for b in humanoid.human_bones
                 ):
-                    bpy.ops.vrm.assign_vrm0_humanoid_human_bones_automatically(
+                    ops.vrm.assign_vrm0_humanoid_human_bones_automatically(
                         armature_name=armature.name
                     )
                 if not humanoid.all_required_bones_are_assigned():
-                    return bpy.ops.wm.vrm_export_human_bones_assignment(
+                    return ops.wm.vrm_export_human_bones_assignment(
                         "INVOKE_DEFAULT",
                         armature_object_name=self.armature_object_name,
                     )
-            elif armature_data.vrm_addon_extension.is_vrm1():
+            elif get_armature_extension(armature_data).is_vrm1():
                 Vrm1HumanBonesPropertyGroup.fixup_human_bones(armature)
                 Vrm1HumanBonesPropertyGroup.update_all_node_candidates(
-                    armature_data.name
+                    context, armature_data.name
                 )
-                human_bones = (
-                    armature_data.vrm_addon_extension.vrm1.humanoid.human_bones
-                )
+                human_bones = get_armature_extension(
+                    armature_data
+                ).vrm1.humanoid.human_bones
                 if all(
                     human_bone.node.bone_name not in human_bone.node_candidates
                     for human_bone in (
                         human_bones.human_bone_name_to_human_bone().values()
                     )
                 ):
-                    bpy.ops.vrm.assign_vrm1_humanoid_human_bones_automatically(
+                    ops.vrm.assign_vrm1_humanoid_human_bones_automatically(
                         armature_name=armature.name
                     )
                 if (
                     not human_bones.all_required_bones_are_assigned()
                     and not human_bones.allow_non_humanoid_rig
                 ):
-                    return bpy.ops.wm.vrm_export_human_bones_assignment(
+                    return ops.wm.vrm_export_human_bones_assignment(
                         "INVOKE_DEFAULT",
                         armature_object_name=self.armature_object_name,
                     )
 
-        if bpy.ops.vrm.model_validate(
+        if ops.vrm.model_validate(
             "INVOKE_DEFAULT",
             show_successful_message=False,
             armature_object_name=self.armature_object_name,
@@ -265,7 +268,7 @@ class EXPORT_SCENE_OT_vrm(Operator, ExportHelper):
         if not self.ignore_warning and any(
             error.severity <= 1 for error in self.errors
         ):
-            return bpy.ops.wm.vrm_export_confirmation(
+            return ops.wm.vrm_export_confirmation(
                 "INVOKE_DEFAULT", armature_object_name=self.armature_object_name
             )
 
@@ -333,7 +336,9 @@ class VRM_PT_export_file_browser_tool_props(Panel):
 
         if operator.errors:
             validation.WM_OT_vrm_validator.draw_errors(
-                operator.errors, False, layout.box()
+                layout.box(),
+                operator.errors,
+                show_successful_message=False,
             )
 
 
@@ -405,7 +410,7 @@ class EXPORT_SCENE_OT_vrma(Operator, ExportHelper):
         if WM_OT_vrma_export_prerequisite.detect_errors(
             context, self.armature_object_name
         ):
-            return bpy.ops.wm.vrma_export_prerequisite(
+            return ops.wm.vrma_export_prerequisite(
                 "INVOKE_DEFAULT",
                 armature_object_name=self.armature_object_name,
             )
@@ -437,9 +442,9 @@ class WM_OT_vrm_export_human_bones_assignment(Operator):
             context,
             export_lights,
             self.armature_object_name,
-            preferences.export_invisibles,
-            preferences.export_only_selections,
-            preferences.export_lights,
+            export_invisibles=preferences.export_invisibles,
+            export_only_selections=preferences.export_only_selections,
+            export_lights=preferences.export_lights,
         )
         armatures = [obj for obj in export_objects if obj.type == "ARMATURE"]
         if len(armatures) != 1:
@@ -448,16 +453,22 @@ class WM_OT_vrm_export_human_bones_assignment(Operator):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
-        if armature_data.vrm_addon_extension.is_vrm0():
+        if get_armature_extension(armature_data).is_vrm0():
             Vrm0HumanoidPropertyGroup.fixup_human_bones(armature)
-            Vrm0HumanoidPropertyGroup.update_all_node_candidates(armature_data.name)
-            humanoid = armature_data.vrm_addon_extension.vrm0.humanoid
+            Vrm0HumanoidPropertyGroup.update_all_node_candidates(
+                context, armature_data.name
+            )
+            humanoid = get_armature_extension(armature_data).vrm0.humanoid
             if not humanoid.all_required_bones_are_assigned():
                 return {"CANCELLED"}
-        elif armature_data.vrm_addon_extension.is_vrm1():
+        elif get_armature_extension(armature_data).is_vrm1():
             Vrm1HumanBonesPropertyGroup.fixup_human_bones(armature)
-            Vrm1HumanBonesPropertyGroup.update_all_node_candidates(armature_data.name)
-            human_bones = armature_data.vrm_addon_extension.vrm1.humanoid.human_bones
+            Vrm1HumanBonesPropertyGroup.update_all_node_candidates(
+                context, armature_data.name
+            )
+            human_bones = get_armature_extension(
+                armature_data
+            ).vrm1.humanoid.human_bones
             if (
                 not human_bones.all_required_bones_are_assigned()
                 and not human_bones.allow_non_humanoid_rig
@@ -465,7 +476,7 @@ class WM_OT_vrm_export_human_bones_assignment(Operator):
                 return {"CANCELLED"}
         else:
             return {"CANCELLED"}
-        return bpy.ops.export_scene.vrm(
+        return ops.export_scene.vrm(
             "INVOKE_DEFAULT", armature_object_name=self.armature_object_name
         )
 
@@ -479,9 +490,9 @@ class WM_OT_vrm_export_human_bones_assignment(Operator):
             for obj in search.export_objects(
                 context,
                 self.armature_object_name,
-                preferences.export_invisibles,
-                preferences.export_only_selections,
-                preferences.export_lights,
+                export_invisibles=preferences.export_invisibles,
+                export_only_selections=preferences.export_only_selections,
+                export_lights=preferences.export_lights,
             )
             if obj.type == "ARMATURE"
         ]
@@ -492,9 +503,9 @@ class WM_OT_vrm_export_human_bones_assignment(Operator):
         if not isinstance(armature_data, Armature):
             return
 
-        if armature_data.vrm_addon_extension.is_vrm0():
+        if get_armature_extension(armature_data).is_vrm0():
             WM_OT_vrm_export_human_bones_assignment.draw_vrm0(self.layout, armature)
-        elif armature_data.vrm_addon_extension.is_vrm1():
+        elif get_armature_extension(armature_data).is_vrm1():
             WM_OT_vrm_export_human_bones_assignment.draw_vrm1(self.layout, armature)
 
     @staticmethod
@@ -503,7 +514,7 @@ class WM_OT_vrm_export_human_bones_assignment(Operator):
         if not isinstance(armature_data, Armature):
             return
 
-        humanoid = armature_data.vrm_addon_extension.vrm0.humanoid
+        humanoid = get_armature_extension(armature_data).vrm0.humanoid
         if humanoid.all_required_bones_are_assigned():
             alert_box = layout.box()
             alert_box.label(
@@ -527,7 +538,7 @@ class WM_OT_vrm_export_human_bones_assignment(Operator):
         if not isinstance(armature_data, Armature):
             return
 
-        human_bones = armature_data.vrm_addon_extension.vrm1.humanoid.human_bones
+        human_bones = get_armature_extension(armature_data).vrm1.humanoid.human_bones
         if human_bones.all_required_bones_are_assigned():
             alert_box = layout.box()
             alert_box.label(
@@ -585,7 +596,7 @@ class WM_OT_vrm_export_confirmation(Operator):
     def execute(self, _context: Context) -> set[str]:
         if not self.export_anyway:
             return {"CANCELLED"}
-        bpy.ops.export_scene.vrm(
+        ops.export_scene.vrm(
             "INVOKE_DEFAULT",
             ignore_warning=True,
             armature_object_name=self.armature_object_name,
@@ -649,7 +660,7 @@ class WM_OT_vrm_export_armature_selection(Operator):
         armature_object = context.blend_data.objects.get(self.armature_object_name)
         if not armature_object or armature_object.type != "ARMATURE":
             return {"CANCELLED"}
-        bpy.ops.export_scene.vrm(
+        ops.export_scene.vrm(
             "INVOKE_DEFAULT", armature_object_name=self.armature_object_name
         )
 
@@ -710,7 +721,7 @@ class WM_OT_vrma_export_prerequisite(Operator):
 
     @staticmethod
     def detect_errors(context: Context, armature_object_name: str) -> list[str]:
-        error_messages = []
+        error_messages: list[str] = []
 
         if not armature_object_name:
             armature = search.current_armature(context)
@@ -726,8 +737,8 @@ class WM_OT_vrma_export_prerequisite(Operator):
             error_messages.append(pgettext("Armature not found"))
             return error_messages
 
-        ext = armature_data.vrm_addon_extension
-        if armature_data.vrm_addon_extension.is_vrm1():
+        ext = get_armature_extension(armature_data)
+        if get_armature_extension(armature_data).is_vrm1():
             humanoid = ext.vrm1.humanoid
             if not humanoid.human_bones.all_required_bones_are_assigned():
                 error_messages.append(pgettext("Please assign required human bones"))
@@ -737,7 +748,7 @@ class WM_OT_vrma_export_prerequisite(Operator):
         return error_messages
 
     def execute(self, _context: Context) -> set[str]:
-        return bpy.ops.export_scene.vrma(
+        return ops.export_scene.vrma(
             "INVOKE_DEFAULT", armature_object_name=self.armature_object_name
         )
 
@@ -787,8 +798,8 @@ class WM_OT_vrma_export_prerequisite(Operator):
         if armature:
             armature_data = armature.data
             if isinstance(armature_data, Armature):
-                ext = armature_data.vrm_addon_extension
-                if armature_data.vrm_addon_extension.is_vrm1():
+                ext = get_armature_extension(armature_data)
+                if get_armature_extension(armature_data).is_vrm1():
                     humanoid = ext.vrm1.humanoid
                     if not humanoid.human_bones.all_required_bones_are_assigned():
                         WM_OT_vrm_export_human_bones_assignment.draw_vrm1(

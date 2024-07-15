@@ -7,6 +7,7 @@ from typing import Optional
 import bpy
 from bpy.app.translations import pgettext
 
+from . import convert
 from .blender_manifest import BlenderManifest
 from .logging import get_logger
 
@@ -29,7 +30,7 @@ cache = Cache(
 )
 
 
-def clear_addon_version_cache() -> Optional[float]:  # pylint: disable=useless-return
+def clear_addon_version_cache() -> Optional[float]:
     cache.use = False
     return None
 
@@ -40,8 +41,10 @@ def trigger_clear_addon_version_cache() -> None:
     bpy.app.timers.register(clear_addon_version_cache, first_interval=0.5)
 
 
-def max_supported_blender_major_minor_version() -> tuple[int, int]:
+def max_supported_blender_major_minor_version() -> Optional[tuple[int, int]]:
     blender_version_max = BlenderManifest.read().blender_version_max
+    if blender_version_max is None:
+        return None
     return (blender_version_max[0], blender_version_max[1])
 
 
@@ -85,27 +88,42 @@ def blender_restart_required() -> bool:
 
 def legacy_addon() -> bool:
     root_module = import_module(".".join(__name__.split(".")[:-2]))
-    bl_info = getattr(root_module, "bl_info", None)
-    if not isinstance(bl_info, dict):
+    bl_info = convert.mapping_or_none(getattr(root_module, "bl_info", None))
+    if bl_info is None:
         return False
-    return bl_info.get("name") == "VRM format"
+
+    return (
+        bl_info.get("name"),
+        bl_info.get("location"),
+    ) == (
+        # https://github.com/saturday06/VRM-Addon-for-Blender/blob/2_20_49/src/io_scene_vrm/__init__.py#L15
+        "VRM format",
+        # https://github.com/saturday06/VRM-Addon-for-Blender/blob/2_20_49/src/io_scene_vrm/__init__.py#L18
+        "File > Import-Export",
+    )
 
 
 def stable_release() -> bool:
-    # for Blender Extensions Platform
-    if not legacy_addon() and bpy.app.version == (4, 2, 0):
+    if (  # for Blender Extensions Platform
+        not legacy_addon()
+        and bpy.app.version == (4, 2, 0)
+        and bpy.app.version_cycle == "rc"
+    ):
         return True
+
     if bpy.app.version_cycle == "release":
         return True
-    if platform.system() == "Windows" and bpy.app.version_cycle == "rc":
-        # Microsoft Store distributes RC versions of 3.3.11 and 3.6.3 as
-        # release versions.
-        return True
-    return False
+
+    # Microsoft Store distributes RC versions of 3.3.11 and 3.6.3 as
+    # release versions.
+    return platform.system() == "Windows" and bpy.app.version_cycle == "rc"
 
 
 def supported() -> bool:
-    return bpy.app.version[:2] <= max_supported_blender_major_minor_version()
+    v = max_supported_blender_major_minor_version()
+    if v is None:
+        return True
+    return bpy.app.version[:2] <= v
 
 
 def preferences_warning_message() -> Optional[str]:

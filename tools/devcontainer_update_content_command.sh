@@ -2,13 +2,13 @@
 
 set -eu -o pipefail
 
-./tools/devcontainer_fixup_workspace.sh
+# Dockerイメージは積極的にキャッシュされ、パッケージが古いままのことが多いのでここでアップデート
+sudo apt-get update
+sudo apt-get dist-upgrade --yes
 
-poetry run python -c "" # 稀にvenvが壊れていることがある。このコマンドで復元する。
-if ! ln -fs "$(poetry env info --path)" .venv-devcontainer; then
-  sudo rm -f .venv-devcontainer
-  ln -fsv "$(poetry env info --path)" .venv-devcontainer
-fi
+./tools/install_hugo.sh
+./tools/install_hadolint.sh
+./tools/devcontainer_fixup_workspace.sh
 
 # Refreshing repository
 # https://git-scm.com/docs/git-status#_background_refresh

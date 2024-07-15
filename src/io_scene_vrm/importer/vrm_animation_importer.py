@@ -13,8 +13,8 @@ from bpy.types import Armature, Context, Object
 from mathutils import Matrix, Quaternion, Vector
 
 from ..common import convert
+from ..common.convert import Json
 from ..common.debug import dump
-from ..common.deep import Json
 from ..common.gl import (
     GL_BYTE,
     GL_FLOAT,
@@ -27,6 +27,8 @@ from ..common.gl import (
 from ..common.gltf import parse_glb
 from ..common.logging import get_logger
 from ..common.vrm1.human_bone import HumanBoneName
+from ..common.workspace import save_workspace
+from ..editor.extension import get_armature_extension
 
 logger = get_logger(__name__)
 
@@ -42,6 +44,7 @@ class NodeRestPoseTree:
     def build(
         node_dicts: list[Json],
         node_index: int,
+        *,
         is_root: bool,
     ) -> list["NodeRestPoseTree"]:
         if not 0 <= node_index < len(node_dicts):
@@ -306,64 +309,51 @@ def work_in_progress(context: Context, path: Path, armature: Object) -> set[str]
     armature_data = armature.data
     if not isinstance(armature_data, Armature):
         return {"CANCELLED"}
-    humanoid = armature_data.vrm_addon_extension.vrm1.humanoid
+    humanoid = get_armature_extension(armature_data).vrm1.humanoid
     if not humanoid.human_bones.all_required_bones_are_assigned():
         return {"CANCELLED"}
 
     saved_pose_position = armature_data.pose_position
-    vrm1 = armature_data.vrm_addon_extension.vrm1
+    vrm1 = get_armature_extension(armature_data).vrm1
 
     # TODO: 現状restがTポーズの時しか動作しない
     # TODO: 自動でTポーズを作成する
     # TODO: Tポーズ取得処理、共通化
-    try:
-        if context.view_layer.objects.active is not None:
-            bpy.ops.object.mode_set(mode="OBJECT")
-        bpy.ops.object.select_all(action="DESELECT")
-        context.view_layer.objects.active = armature
-        bpy.ops.object.mode_set(mode="POSE")
+    with save_workspace(context, armature):
+        try:
+            bpy.ops.object.select_all(action="DESELECT")
+            bpy.ops.object.mode_set(mode="POSE")
 
-        armature_data.pose_position = "POSE"
-
-        t_pose_action = vrm1.humanoid.pose_library
-        t_pose_pose_marker_name = vrm1.humanoid.pose_marker_name
-        pose_marker_frame = 0
-        if t_pose_action and t_pose_pose_marker_name:
-            for search_pose_marker in t_pose_action.pose_markers.values():
-                if search_pose_marker.name == t_pose_pose_marker_name:
-                    pose_marker_frame = search_pose_marker.frame
-                    break
-
-        bpy.context.view_layer.update()
-
-        if t_pose_action:
-            armature.pose.apply_pose_from_action(
-                t_pose_action, evaluation_time=pose_marker_frame
-            )
-        else:
-            for bone in armature.pose.bones:
-                bone.location = Vector((0, 0, 0))
-                bone.scale = Vector((1, 1, 1))
-                if bone.rotation_mode != "QUATERNION":
-                    bone.rotation_mode = "QUATERNION"
-                bone.rotation_quaternion = Quaternion()
-
-        bpy.context.view_layer.update()
-
-        return work_in_progress_2(context, path, armature)
-    finally:
-        # TODO: リストア処理、共通化
-        if armature_data.pose_position != "POSE":
             armature_data.pose_position = "POSE"
-        if context.view_layer.objects.active is not None:
-            bpy.ops.object.mode_set(mode="OBJECT")
-        bpy.ops.object.select_all(action="DESELECT")
-        context.view_layer.objects.active = armature
-        bpy.context.view_layer.update()
 
-        if saved_pose_position:
+            t_pose_action = vrm1.humanoid.pose_library
+            t_pose_pose_marker_name = vrm1.humanoid.pose_marker_name
+            pose_marker_frame = 0
+            if t_pose_action and t_pose_pose_marker_name:
+                for search_pose_marker in t_pose_action.pose_markers.values():
+                    if search_pose_marker.name == t_pose_pose_marker_name:
+                        pose_marker_frame = search_pose_marker.frame
+                        break
+
+            context.view_layer.update()
+
+            if t_pose_action:
+                armature.pose.apply_pose_from_action(
+                    t_pose_action, evaluation_time=pose_marker_frame
+                )
+            else:
+                for bone in armature.pose.bones:
+                    bone.location = Vector((0, 0, 0))
+                    bone.scale = Vector((1, 1, 1))
+                    if bone.rotation_mode != "QUATERNION":
+                        bone.rotation_mode = "QUATERNION"
+                    bone.rotation_quaternion = Quaternion()
+
+            context.view_layer.update()
+
+            return work_in_progress_2(context, path, armature)
+        finally:
             armature_data.pose_position = saved_pose_position
-        bpy.ops.object.mode_set(mode="OBJECT")
 
 
 def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[str]:
@@ -372,10 +362,10 @@ def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[st
     armature_data = armature.data
     if not isinstance(armature_data, Armature):
         return {"CANCELLED"}
-    humanoid = armature_data.vrm_addon_extension.vrm1.humanoid
+    humanoid = get_armature_extension(armature_data).vrm1.humanoid
     if not humanoid.human_bones.all_required_bones_are_assigned():
         return {"CANCELLED"}
-    look_at = armature_data.vrm_addon_extension.vrm1.look_at
+    look_at = get_armature_extension(armature_data).vrm1.look_at
 
     vrma_dict, buffer0_bytes = parse_glb(path.read_bytes())
 
@@ -477,7 +467,7 @@ def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[st
     if not isinstance(buffer_dicts, list):
         return {"CANCELLED"}
 
-    humanoid_action = bpy.data.actions.new(name="Humanoid")
+    humanoid_action = context.blend_data.actions.new(name="Humanoid")
     if not armature.animation_data:
         armature.animation_data_create()
     if not armature.animation_data:
@@ -485,7 +475,7 @@ def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[st
         raise ValueError(message)
     armature.animation_data.action = humanoid_action
 
-    expression_action = bpy.data.actions.new(name="Expressions")
+    expression_action = context.blend_data.actions.new(name="Expressions")
     if not armature_data.animation_data:
         armature_data.animation_data_create()
     if not armature_data.animation_data:
@@ -612,7 +602,11 @@ def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[st
     first_timestamp = timestamps[0]
     last_timestamp = timestamps[-1]
 
-    logger.debug(f"{first_timestamp=} ... {last_timestamp=}")
+    logger.debug(
+        "first_timestamp=%s ... last_timestamp=%s",
+        first_timestamp,
+        last_timestamp,
+    )
 
     look_at_target_object = None
     look_at_translation_keyframes = None
@@ -636,7 +630,7 @@ def work_in_progress_2(context: Context, path: Path, armature: Object) -> set[st
                 if not isinstance(look_at_target_name, str) or not look_at_target_name:
                     look_at_target_name = "LookAtTarget"
                 if look_at_target_translation is not None:
-                    look_at_target_object = bpy.data.objects.new(
+                    look_at_target_object = context.blend_data.objects.new(
                         name=look_at_target_name, object_data=None
                     )
                     look_at_target_object.empty_display_size = 0.125
@@ -740,7 +734,7 @@ def assign_expression_keyframe(
     frame_count: int,
     timestamp: float,
 ) -> None:
-    expressions = armature_data.vrm_addon_extension.vrm1.expressions
+    expressions = get_armature_extension(armature_data).vrm1.expressions
     expression_name_to_expression = expressions.all_name_to_expression_dict()
     for (
         expression_name,
@@ -892,7 +886,7 @@ def assign_humanoid_keyframe(
         HumanBoneName.LEFT_EYE,
         HumanBoneName.RIGHT_EYE,
     ]:
-        human_bones = armature_data.vrm_addon_extension.vrm1.humanoid.human_bones
+        human_bones = get_armature_extension(armature_data).vrm1.humanoid.human_bones
         human_bone = human_bones.human_bone_name_to_human_bone().get(human_bone_name)
         if human_bone:
             bone = armature.pose.bones.get(human_bone.node.bone_name)
@@ -919,29 +913,29 @@ def assign_humanoid_keyframe(
 
                 if rotation_keyframes:
                     logger.debug(
-                        f"================= {human_bone_name.value} ================="
+                        "================= %s =================", human_bone_name.value
                     )
                     logger.debug(
-                        f"humanoid world matrix = {dump(humanoid_rest_world_matrix)}"
+                        "humanoid world matrix = %s", dump(humanoid_rest_world_matrix)
                     )
-                    logger.debug(f"rest_local_matrix     = {dump(rest_local_matrix)}")
-                    logger.debug(f"pose_local_matrix     = {dump(pose_local_matrix)}")
-                    logger.debug(f"rest_world_matrix     = {dump(rest_world_matrix)}")
-                    logger.debug(f"pose_world_matrix     = {dump(pose_world_matrix)}")
-                    logger.debug(f"rest_to_pose_matrix  = {dump(rest_to_pose_matrix)}")
+                    logger.debug("rest_local_matrix     = %s", dump(rest_local_matrix))
+                    logger.debug("pose_local_matrix     = %s", dump(pose_local_matrix))
+                    logger.debug("rest_world_matrix     = %s", dump(rest_world_matrix))
+                    logger.debug("pose_world_matrix     = %s", dump(pose_world_matrix))
+                    logger.debug("rest_to_pose_matrix  = %s", dump(rest_to_pose_matrix))
                     logger.debug(
-                        "rest_to_pose_world_rotation = "
-                        + dump(rest_to_pose_world_rotation)
+                        "rest_to_pose_world_rotation = %s",
+                        dump(rest_to_pose_world_rotation),
                     )
                     logger.debug(
-                        "rest_to_pose_target_local_rotation = "
-                        + dump(rest_to_pose_target_local_rotation)
+                        "rest_to_pose_target_local_rotation = %s",
+                        dump(rest_to_pose_target_local_rotation),
                     )
 
-                    # logger.debug(f"parent bone matrix  = {dump(parent_matrix)}")
-                    logger.debug(f"       bone matrix  = {dump(bone.matrix)}")
+                    # logger.debug("parent bone matrix  = %s", dump(parent_matrix))
+                    logger.debug("       bone matrix  = %s", dump(bone.matrix))
                     logger.debug(
-                        f"current bone rotation = {dump(bone.rotation_quaternion)}"
+                        "current bone rotation = %s", dump(bone.rotation_quaternion)
                     )
 
                     backup_rotation_quaternion = bone.rotation_quaternion.copy()

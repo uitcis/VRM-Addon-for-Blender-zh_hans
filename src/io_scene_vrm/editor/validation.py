@@ -2,7 +2,6 @@ from pathlib import Path
 from sys import float_info
 from typing import TYPE_CHECKING, Optional
 
-import bpy
 from bpy.app.translations import pgettext
 from bpy.props import BoolProperty, CollectionProperty, IntProperty, StringProperty
 from bpy.types import (
@@ -24,14 +23,15 @@ from bpy.types import (
 from mathutils import Vector
 
 from ..common import shader, version
-from ..common.gltf import RGBA_INPUT_NAMES, TEXTURE_INPUT_NAMES, VAL_INPUT_NAMES
+from ..common.legacy_gltf import RGBA_INPUT_NAMES, TEXTURE_INPUT_NAMES, VAL_INPUT_NAMES
 from ..common.logging import get_logger
 from ..common.mtoon_unversioned import MtoonUnversioned
 from ..common.preferences import get_preferences
 from ..common.vrm0 import human_bone as vrm0_human_bone
 from ..common.vrm1 import human_bone as vrm1_human_bone
-from ..editor.property_group import CollectionPropertyProtocol
 from . import migration, search
+from .extension import get_armature_extension, get_material_extension
+from .property_group import CollectionPropertyProtocol
 
 logger = get_logger(__name__)
 
@@ -72,7 +72,7 @@ class WM_OT_vrm_validator(Operator):
                 logger.warning("Validation error: truncated ...")
                 break
             if error.severity == 0:
-                logger.warning("Validation error: " + error.message)
+                logger.warning("Validation error: %s", error.message)
                 fatal_error_count += 1
         if fatal_error_count > 0:
             return {"CANCELLED"}
@@ -94,20 +94,29 @@ class WM_OT_vrm_validator(Operator):
         return context.window_manager.invoke_props_dialog(self, width=800)
 
     def draw(self, _context: Context) -> None:
-        self.draw_errors(self.errors, self.show_successful_message, self.layout)
+        self.draw_errors(
+            self.layout,
+            self.errors,
+            show_successful_message=self.show_successful_message,
+        )
 
     @staticmethod
     def validate_bone_order_vrm0(
+        context: Context,
         messages: list[str],
         armature: Object,
+        *,
         readonly: bool,
     ) -> None:
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             message = f"{type(armature_data)} is not an Armature"
             raise TypeError(message)
-        humanoid = armature_data.vrm_addon_extension.vrm0.humanoid
-        humanoid.update_all_node_candidates(armature_data.name, defer=readonly)
+        humanoid = get_armature_extension(armature_data).vrm0.humanoid
+        if readonly:
+            humanoid.defer_update_all_node_candidates(armature_data.name)
+        else:
+            humanoid.update_all_node_candidates(context, armature_data.name)
         for human_bone in humanoid.human_bones:
             if (
                 not human_bone.node.bone_name
@@ -130,16 +139,21 @@ class WM_OT_vrm_validator(Operator):
 
     @staticmethod
     def validate_bone_order_vrm1(
+        context: Context,
         messages: list[str],
         armature: Object,
+        *,
         readonly: bool,
     ) -> None:
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             message = f"{type(armature_data)} is not an Armature"
             raise TypeError(message)
-        human_bones = armature_data.vrm_addon_extension.vrm1.humanoid.human_bones
-        human_bones.update_all_node_candidates(armature_data.name, defer=readonly)
+        human_bones = get_armature_extension(armature_data).vrm1.humanoid.human_bones
+        if readonly:
+            human_bones.defer_update_all_node_candidates(armature_data.name)
+        else:
+            human_bones.update_all_node_candidates(context, armature_data.name)
         for (
             human_bone_name,
             human_bone,
@@ -167,24 +181,31 @@ class WM_OT_vrm_validator(Operator):
 
     @staticmethod
     def validate_bone_order(
+        context: Context,
         messages: list[str],
         armature: Object,
+        *,
         readonly: bool,
     ) -> None:
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             message = f"{type(armature_data)} is not an Armature"
             raise TypeError(message)
-        if armature_data.vrm_addon_extension.is_vrm0():
-            WM_OT_vrm_validator.validate_bone_order_vrm0(messages, armature, readonly)
+        if get_armature_extension(armature_data).is_vrm0():
+            WM_OT_vrm_validator.validate_bone_order_vrm0(
+                context, messages, armature, readonly=readonly
+            )
         else:
-            WM_OT_vrm_validator.validate_bone_order_vrm1(messages, armature, readonly)
+            WM_OT_vrm_validator.validate_bone_order_vrm1(
+                context, messages, armature, readonly=readonly
+            )
 
     @staticmethod
     def detect_errors(
         context: Context,
         error_collection: CollectionPropertyProtocol[VrmValidationError],
         armature_object_name: str,
+        *,
         execute_migration: bool = False,
         readonly: bool = True,
     ) -> None:
@@ -211,9 +232,9 @@ class WM_OT_vrm_validator(Operator):
         export_objects = search.export_objects(
             context,
             armature_object_name,
-            preferences.export_invisibles,
-            preferences.export_only_selections,
-            preferences.export_lights,
+            export_invisibles=preferences.export_invisibles,
+            export_only_selections=preferences.export_only_selections,
+            export_lights=preferences.export_lights,
         )
 
         if not any(
@@ -291,10 +312,10 @@ class WM_OT_vrm_validator(Operator):
                 armature = obj
                 armature_data = armature.data
                 if not isinstance(armature_data, Armature):
-                    logger.error(f"{type(armature_data)} is not an Armature")
+                    logger.error("%s is not an Armature", type(armature_data))
                     continue
                 if execute_migration:
-                    migration.migrate(armature.name, defer=False)
+                    migration.migrate(context, armature.name)
                 bone: Optional[Bone] = None
                 for bone in armature_data.bones:
                     if bone.name in node_names:  # nodes name is unique
@@ -310,15 +331,15 @@ class WM_OT_vrm_validator(Operator):
 
                 # TODO: T_POSE,
                 all_required_bones_exist = True
-                if armature_data.vrm_addon_extension.is_vrm1():
+                if get_armature_extension(armature_data).is_vrm1():
                     _, _, constraint_warning_messages = search.export_constraints(
                         export_objects, armature
                     )
                     skippable_warning_messages.extend(constraint_warning_messages)
 
-                    human_bones = (
-                        armature_data.vrm_addon_extension.vrm1.humanoid.human_bones
-                    )
+                    human_bones = get_armature_extension(
+                        armature_data
+                    ).vrm1.humanoid.human_bones
 
                     human_bone_name_to_human_bone = (
                         human_bones.human_bone_name_to_human_bone()
@@ -399,7 +420,7 @@ class WM_OT_vrm_validator(Operator):
                         )
 
                 else:
-                    humanoid = armature_data.vrm_addon_extension.vrm0.humanoid
+                    humanoid = get_armature_extension(armature_data).vrm0.humanoid
                     human_bones = humanoid.human_bones
                     all_required_bones_exist = True
                     for (
@@ -426,13 +447,13 @@ class WM_OT_vrm_validator(Operator):
                         )
                 if all_required_bones_exist:
                     WM_OT_vrm_validator.validate_bone_order(
-                        error_messages, armature, readonly
+                        context, error_messages, armature, readonly=readonly
                     )
 
             if obj.type == "MESH":
                 mesh_data = obj.data
                 if not isinstance(mesh_data, Mesh):
-                    logger.error(f"{type(mesh_data)} is not a Mesh")
+                    logger.error("%s is not a Mesh", type(mesh_data))
                     continue
                 for poly in mesh_data.polygons:
                     if poly.loop_total > 3:  # polygons need all triangle
@@ -450,7 +471,7 @@ class WM_OT_vrm_validator(Operator):
         if (
             armature is not None
             and isinstance(armature.data, Armature)
-            and armature.data.vrm_addon_extension.is_vrm1()
+            and get_armature_extension(armature.data).is_vrm1()
         ):
             error_messages.extend(
                 pgettext(
@@ -463,7 +484,7 @@ class WM_OT_vrm_validator(Operator):
             )
 
             joint_chain_bone_names_to_spring_vrm_name: dict[str, str] = {}
-            for spring in armature.data.vrm_addon_extension.spring_bone1.springs:
+            for spring in get_armature_extension(armature.data).spring_bone1.springs:
                 joint_bone_names: list[str] = []
                 for joint in spring.joints:
                     bone_name = joint.node.bone_name
@@ -507,7 +528,7 @@ class WM_OT_vrm_validator(Operator):
                         )
                     )
 
-        used_materials = search.export_materials(export_objects)
+        used_materials = search.export_materials(context, export_objects)
         used_images: list[Image] = []
         bones_name = []
         if armature is not None and isinstance(armature.data, Armature):
@@ -527,7 +548,7 @@ class WM_OT_vrm_validator(Operator):
                     if (
                         armature is not None
                         and isinstance(armature.data, Armature)
-                        and armature.data.vrm_addon_extension.is_vrm1()
+                        and get_armature_extension(armature.data).is_vrm1()
                     ):
                         continue
                     info_messages.append(
@@ -559,7 +580,7 @@ class WM_OT_vrm_validator(Operator):
                         vertex_error_count = vertex_error_count + 1
 
         for mat in used_materials:
-            if not mat.node_tree or mat.vrm_addon_extension.mtoon1.enabled:
+            if not mat.node_tree or get_material_extension(mat).mtoon1.enabled:
                 continue
             for node in mat.node_tree.nodes:
                 if node.type != "OUTPUT_MATERIAL":
@@ -593,9 +614,11 @@ class WM_OT_vrm_validator(Operator):
                     ).format(material_name=mat.name)
                 )
 
-        for node, material in search.shader_nodes_and_materials(used_materials):
+        for node, vrm_shader_name, material in search.shader_nodes_and_materials(
+            used_materials
+        ):
             # MToon
-            if node.node_tree["SHADER"] == "MToon_unversioned":
+            if vrm_shader_name == "MToon_unversioned":
                 for texture_val in MtoonUnversioned.texture_kind_exchange_dict.values():
                     suffix = "_alpha" if texture_val == "ReceiveShadow_Texture" else ""
                     node_material_input_check(
@@ -622,7 +645,7 @@ class WM_OT_vrm_validator(Operator):
                         used_images,
                     )
             # GLTF
-            elif node.node_tree["SHADER"] == "GLTF":
+            elif vrm_shader_name == "GLTF":
                 for k in TEXTURE_INPUT_NAMES:
                     node_material_input_check(
                         node, material, "TEX_IMAGE", k, error_messages, used_images
@@ -636,7 +659,7 @@ class WM_OT_vrm_validator(Operator):
                         node, material, "RGB", k, error_messages, used_images
                     )
             # Transparent_Zwrite
-            elif node.node_tree["SHADER"] == "TRANSPARENT_ZWRITE":
+            elif vrm_shader_name == "TRANSPARENT_ZWRITE":
                 node_material_input_check(
                     node,
                     material,
@@ -647,7 +670,7 @@ class WM_OT_vrm_validator(Operator):
                 )
 
         for mat in used_materials:
-            gltf = mat.vrm_addon_extension.mtoon1
+            gltf = get_material_extension(mat).mtoon1
             if not gltf.enabled:
                 continue
 
@@ -655,10 +678,10 @@ class WM_OT_vrm_validator(Operator):
                 downgrade_to_mtoon0=(
                     armature is None
                     or not isinstance(armature.data, Armature)
-                    or armature.data.vrm_addon_extension.is_vrm0()
+                    or get_armature_extension(armature.data).is_vrm0()
                 )
             ):
-                source = texture.source
+                source = texture.get_connected_node_image()
                 if not source:
                     continue
                 if source not in used_images:
@@ -679,14 +702,14 @@ class WM_OT_vrm_validator(Operator):
                 )
 
             for texture_info in gltf.all_texture_info():
-                source = texture_info.index.source
+                source = texture_info.index.get_connected_node_image()
                 if source and source not in used_images:
                     used_images.append(source)
 
                 if (
                     armature is None
                     or not isinstance(armature.data, Armature)
-                    or not armature.data.vrm_addon_extension.is_vrm0()
+                    or not get_armature_extension(armature.data).is_vrm0()
                     or not source
                 ):
                     continue
@@ -733,7 +756,7 @@ class WM_OT_vrm_validator(Operator):
         if (
             armature is not None
             and isinstance(armature.data, Armature)
-            and armature.data.vrm_addon_extension.is_vrm0()
+            and get_armature_extension(armature.data).is_vrm0()
         ):
             if export_fb_ngon_encoding:
                 warning_messages.append(
@@ -744,7 +767,7 @@ class WM_OT_vrm_validator(Operator):
                 )
 
             # first_person
-            first_person = armature.data.vrm_addon_extension.vrm0.first_person
+            first_person = get_armature_extension(armature.data).vrm0.first_person
             if not first_person.first_person_bone.bone_name:
                 info_messages.append(
                     pgettext(
@@ -755,40 +778,53 @@ class WM_OT_vrm_validator(Operator):
 
             # blend_shape_master
             # TODO: material value and material existence
-            blend_shape_master = (
-                armature.data.vrm_addon_extension.vrm0.blend_shape_master
-            )
+            blend_shape_master = get_armature_extension(
+                armature.data
+            ).vrm0.blend_shape_master
             for blend_shape_group in blend_shape_master.blend_shape_groups:
                 for bind in blend_shape_group.binds:
-                    mesh_object = bpy.data.objects.get(bind.mesh.mesh_object_name)
+                    mesh_object_name = bind.mesh.mesh_object_name
+                    if not bind.index or not mesh_object_name:
+                        continue
+                    mesh_object = next(
+                        iter(
+                            obj
+                            for obj in export_objects
+                            if obj.name == mesh_object_name
+                        ),
+                        None,
+                    )
+                    if (
+                        not mesh_object
+                        and mesh_object_name in context.blend_data.objects
+                    ):
+                        info_messages.append(
+                            pgettext(
+                                'A mesh named "{mesh_name}" is assigned to a blend'
+                                + ' shape group named "{blend_shape_group_name}" but'
+                                + " the mesh will not be exported"
+                            ).format(
+                                blend_shape_group_name=blend_shape_group.name,
+                                mesh_name=mesh_object_name,
+                            )
+                        )
                     if not mesh_object:
                         continue
                     mesh_data = mesh_object.data
                     if not isinstance(mesh_data, Mesh):
                         continue
                     shape_keys = mesh_data.shape_keys
-                    if not shape_keys:
+                    if not shape_keys or bind.index not in shape_keys.key_blocks:
                         info_messages.append(
                             pgettext(
-                                'mesh "{mesh_name}" doesn\'t have shape key. '
-                                + 'But blend shape group needs "{shape_key_name}"'
-                                + " in its shape key."
+                                'A shape key named "{shape_key_name}" in a mesh'
+                                + ' named "{mesh_name}" is assigned to a blend shape'
+                                + ' group named "{blend_shape_group_name}" but the'
+                                + " shape key doesn't exist."
                             ).format(
-                                mesh_name=bind.mesh.name,
+                                mesh_name=mesh_object.name,
                                 shape_key_name=bind.index,
-                            )
-                        )
-                        continue
-
-                    if bind.index not in shape_keys.key_blocks:
-                        info_messages.append(
-                            pgettext(
-                                'mesh "{mesh_name}" doesn\'t have '
-                                + '"{shape_key_name}" shape key. '
-                                + "But blend shape group needs it."
-                            ).format(
-                                mesh_name=bind.mesh.name,
-                                shape_key_name=bind.index,
+                                blend_shape_group_name=blend_shape_group.name,
                             )
                         )
 
@@ -834,13 +870,14 @@ class WM_OT_vrm_validator(Operator):
 
     @staticmethod
     def draw_errors(
-        error_collection: CollectionPropertyProtocol[VrmValidationError],
-        show_successful_message: bool,
         layout: UILayout,
+        error_collection: CollectionPropertyProtocol[VrmValidationError],
+        *,
+        show_successful_message: bool,
     ) -> None:
-        error_errors = []
-        warning_errors = []
-        info_errors = []
+        error_errors: list[VrmValidationError] = []
+        warning_errors: list[VrmValidationError] = []
+        info_errors: list[VrmValidationError] = []
 
         for error in error_collection:
             if error.severity == 0:

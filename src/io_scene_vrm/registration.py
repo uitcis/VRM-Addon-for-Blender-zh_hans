@@ -14,6 +14,7 @@ from bpy.types import (
     KeyingSetInfo,
     Material,
     Menu,
+    NodeTree,
     Object,
     Operator,
     Panel,
@@ -39,6 +40,7 @@ from .editor import (
     ops,
     panel,
     property_group,
+    subscription,
     validation,
 )
 from .editor.mtoon0 import glsl_drawer
@@ -71,8 +73,15 @@ from .locale.translation_dictionary import translation_dictionary
 logger = get_logger(__name__)
 
 
+def setup(*, load_post: bool) -> None:
+    context = bpy.context
+    shader.add_shaders(context)
+    migration.migrate_all_objects(context)
+    subscription.setup_subscription(load_post=load_post)
+
+
 @persistent
-def load_post(_dummy: object) -> None:
+def load_post(_unused: object) -> None:
     if (
         depsgraph_update_pre_once_if_load_post_is_unavailable
         in bpy.app.handlers.depsgraph_update_pre
@@ -81,16 +90,18 @@ def load_post(_dummy: object) -> None:
             depsgraph_update_pre_once_if_load_post_is_unavailable
         )
 
-    shader.add_shaders()
-    migration.migrate_all_objects()
-    migration.setup_subscription(load_post=True)
+    setup(load_post=True)
 
 
 @persistent
-def depsgraph_update_pre_once_if_load_post_is_unavailable(_dummy: object) -> None:
-    # register時もload_postと同様の初期化を行いたい。しかし、registerに直接書くと
-    # Blender起動直後のコンテキストではエラーになってしまう。
-    # そのためdepsgraph_update_preを使う。
+def depsgraph_update_pre_once_if_load_post_is_unavailable(_unused: object) -> None:
+    """Execute the same routine as load_post() in depsgraph_update_pre().
+
+    We want to execute the same routine as load_post() when register() is called.
+    However, if we execute it directly in register(), an error will occur in the
+    context of Blender startup; we can avoid the error by executing it in
+    depsgraph_update_pre().
+    """
     if (
         depsgraph_update_pre_once_if_load_post_is_unavailable
         not in bpy.app.handlers.depsgraph_update_pre
@@ -101,23 +112,21 @@ def depsgraph_update_pre_once_if_load_post_is_unavailable(_dummy: object) -> Non
         depsgraph_update_pre_once_if_load_post_is_unavailable
     )
 
-    shader.add_shaders()
-    migration.migrate_all_objects()
-    migration.setup_subscription(load_post=False)
+    setup(load_post=False)
 
 
 @persistent
-def depsgraph_update_pre(_dummy: object) -> None:
+def depsgraph_update_pre(_unused: object) -> None:
     trigger_clear_addon_version_cache()
 
 
 @persistent
-def save_pre(_dummy: object) -> None:
-    # 保存の際にtimersに登録したコールバックがもし起動しても
-    # 内部データを変更しないようにする
+def save_pre(_unused: object) -> None:
+    # Apply pending changes before saving.
     depsgraph_update_pre_once_if_load_post_is_unavailable(None)
-    migration.migrate_all_objects()
-    extension.update_internal_cache(bpy.context)
+    context = bpy.context
+    migration.migrate_all_objects(context)
+    extension.update_internal_cache(context)
 
 
 # Each row of the matrix world
@@ -411,6 +420,7 @@ classes: list[
     mtoon1_ops.VRM_OT_reset_mtoon1_material_shader_node_tree,
     mtoon1_ops.VRM_OT_import_mtoon1_texture_image_file,
     mtoon1_ops.VRM_OT_refresh_mtoon1_outline,
+    mtoon1_ops.VRM_OT_show_material_blender_4_2_warning,
     mtoon1_ops.StoreViewportMatrixOperator,
     detail_mesh_maker.ICYP_OT_detail_mesh_maker,
     glsl_drawer.ICYP_OT_draw_model,
@@ -449,13 +459,14 @@ classes: list[
     extension.VrmAddonSceneExtensionPropertyGroup,
     extension.VrmAddonMaterialExtensionPropertyGroup,
     extension.VrmAddonObjectExtensionPropertyGroup,
+    extension.VrmAddonNodeTreeExtensionPropertyGroup,
     ViewportMatrixRow,  # The Viewport Matrix is used in a modal to update Matcaps
 ]
 
 
 def register() -> None:
     name = ".".join(__name__.split(".")[:-1])
-    logger.debug(f"Registering: {name}")
+    logger.debug("Registering: %s", name)
 
     bpy.app.translations.register(
         preferences.addon_package_name,
@@ -465,23 +476,27 @@ def register() -> None:
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    Material.vrm_addon_extension = PointerProperty(  # type: ignore[assignment]
+    NodeTree.vrm_addon_extension = PointerProperty(  # type: ignore[attr-defined, assignment, unused-ignore]
+        type=extension.VrmAddonNodeTreeExtensionPropertyGroup
+    )
+
+    Material.vrm_addon_extension = PointerProperty(  # type: ignore[attr-defined, assignment, unused-ignore]
         type=extension.VrmAddonMaterialExtensionPropertyGroup
     )
 
-    Scene.vrm_addon_extension = PointerProperty(  # type: ignore[assignment]
+    Scene.vrm_addon_extension = PointerProperty(  # type: ignore[attr-defined, assignment, unused-ignore]
         type=extension.VrmAddonSceneExtensionPropertyGroup
     )
 
-    Bone.vrm_addon_extension = PointerProperty(  # type: ignore[assignment]
+    Bone.vrm_addon_extension = PointerProperty(  # type: ignore[attr-defined, assignment, unused-ignore]
         type=extension.VrmAddonBoneExtensionPropertyGroup
     )
 
-    Armature.vrm_addon_extension = PointerProperty(  # type: ignore[assignment]
+    Armature.vrm_addon_extension = PointerProperty(  # type: ignore[attr-defined, assignment, unused-ignore]
         type=extension.VrmAddonArmatureExtensionPropertyGroup
     )
 
-    Object.vrm_addon_extension = PointerProperty(  # type: ignore[assignment]
+    Object.vrm_addon_extension = PointerProperty(  # type: ignore[attr-defined, assignment, unused-ignore]
         type=extension.VrmAddonObjectExtensionPropertyGroup
     )
 
@@ -518,6 +533,7 @@ def register() -> None:
 
     io_scene_gltf2_support.init_extras_export()
 
+    logger.debug("Registered: %s", name)
     # The Viewport Matrix is used in a modal to update Matcaps
     bpy.app.timers.register(
         mtoon1_ops.delayed_start_for_viewport_matrix,
@@ -529,8 +545,7 @@ def register() -> None:
 
 
 def unregister() -> None:
-    # migration.setup_subscription()はload_postで呼ばれる
-    migration.teardown_subscription()
+    subscription.teardown_subscription()
 
     bpy.app.handlers.depsgraph_update_pre.remove(
         spring_bone1_handler.depsgraph_update_pre
@@ -564,25 +579,28 @@ def unregister() -> None:
     TOPBAR_MT_file_import.remove(import_scene.menu_import)
 
     if hasattr(Object, "vrm_addon_extension"):
-        del Object.vrm_addon_extension  # type: ignore[reportGeneralTypeIssues, unused-ignore]
+        del Object.vrm_addon_extension  # pyright: ignore [reportAttributeAccessIssue]
 
     if hasattr(Armature, "vrm_addon_extension"):
-        del Armature.vrm_addon_extension  # type: ignore[reportGeneralTypeIssues, unused-ignore]
+        del Armature.vrm_addon_extension  # pyright: ignore [reportAttributeAccessIssue]
 
     if hasattr(Bone, "vrm_addon_extension"):
-        del Bone.vrm_addon_extension  # type: ignore[reportGeneralTypeIssues, unused-ignore]
+        del Bone.vrm_addon_extension  # pyright: ignore [reportAttributeAccessIssue]
 
     if hasattr(Scene, "vrm_addon_extension"):
-        del Scene.vrm_addon_extension  # type: ignore[reportGeneralTypeIssues, unused-ignore]
+        del Scene.vrm_addon_extension  # pyright: ignore [reportAttributeAccessIssue]
 
     if hasattr(Material, "vrm_addon_extension"):
-        del Material.vrm_addon_extension  # type: ignore[reportGeneralTypeIssues, unused-ignore]
+        del Material.vrm_addon_extension  # pyright: ignore [reportAttributeAccessIssue]
+
+    if hasattr(NodeTree, "vrm_addon_extension"):
+        del NodeTree.vrm_addon_extension  # pyright: ignore [reportAttributeAccessIssue]
 
     for cls in reversed(classes):
         try:
             bpy.utils.unregister_class(cls)
         except RuntimeError:
-            logger.exception(f"Failed to Unregister {cls}")
+            logger.exception("Failed to Unregister %s", cls)
 
     # The Viewport Matrix is used in a modal to update Matcaps
     try:

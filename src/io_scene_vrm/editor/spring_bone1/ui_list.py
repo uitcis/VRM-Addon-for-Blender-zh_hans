@@ -1,7 +1,7 @@
-import bpy
 from bpy.types import Context, UILayout, UIList
 
 from ...common.logging import get_logger
+from ..extension import get_armature_extension
 from .property_group import (
     SpringBone1ColliderGroupPropertyGroup,
     SpringBone1ColliderGroupReferencePropertyGroup,
@@ -84,7 +84,7 @@ class VRM_UL_spring_bone1_collider_group_collider(UIList):
 
     def draw_item(
         self,
-        _context: Context,
+        context: Context,
         layout: UILayout,
         collider_group: object,
         collider: object,
@@ -110,8 +110,8 @@ class VRM_UL_spring_bone1_collider_group_collider(UIList):
 
         # Search for armature
         spring_bone = None
-        for armature in bpy.data.armatures:
-            ext = armature.vrm_addon_extension
+        for armature in context.blend_data.armatures:
+            ext = get_armature_extension(armature)
             if any(collider_group == c for c in ext.spring_bone1.collider_groups):
                 spring_bone = ext.spring_bone1
                 break
@@ -200,7 +200,7 @@ class VRM_UL_spring_bone1_spring_collider_group(UIList):
 
     def draw_item(
         self,
-        _context: Context,
+        context: Context,
         layout: UILayout,
         spring: object,
         collider_group: object,
@@ -229,8 +229,8 @@ class VRM_UL_spring_bone1_spring_collider_group(UIList):
 
         # Search for armature
         spring_bone = None
-        for armature in bpy.data.armatures:
-            ext = armature.vrm_addon_extension
+        for armature in context.blend_data.armatures:
+            ext = get_armature_extension(armature)
             if any(spring == s for s in ext.spring_bone1.springs):
                 spring_bone = ext.spring_bone1
                 break

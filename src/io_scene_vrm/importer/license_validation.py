@@ -6,7 +6,7 @@ from urllib.parse import ParseResult, parse_qsl, urlparse
 from bpy.app.translations import pgettext
 
 from ..common import deep
-from ..common.deep import Json
+from ..common.convert import Json
 
 
 class LicenseConfirmationRequiredProp:
@@ -116,10 +116,9 @@ def validate_uni_virtual_license_url(
 
 
 def validate_license(json_dict: dict[str, Json]) -> None:
+    """Validate that the license is not a non-modifiable license, such as CC_ND."""
     confirmations: list[LicenseConfirmationRequiredProp] = []
 
-    # 既知の改変不可ライセンスを撥ねる
-    # CC_NDなど
     license_name = str(
         deep.get(json_dict, ["extensions", "VRM", "meta", "licenseName"], "")
     )

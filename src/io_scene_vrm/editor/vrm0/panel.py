@@ -13,8 +13,12 @@ from bpy.types import (
 
 from ...common.vrm0.human_bone import HumanBoneSpecification, HumanBoneSpecifications
 from .. import ops, search
-from ..extension import VrmAddonSceneExtensionPropertyGroup
-from ..migration import migrate
+from ..extension import (
+    get_armature_extension,
+    get_material_extension,
+    get_scene_extension,
+)
+from ..migration import defer_migrate
 from ..ops import layout_operator
 from ..panel import VRM_PT_vrm_armature_object_property, draw_template_list
 from ..search import active_object_is_vrm0_armature
@@ -99,7 +103,7 @@ def draw_vrm0_humanoid_required_bones_layout(
     if not isinstance(armature_data, Armature):
         return
 
-    humanoid = armature_data.vrm_addon_extension.vrm0.humanoid
+    humanoid = get_armature_extension(armature_data).vrm0.humanoid
     layout.label(text="VRM Required Bones", icon="ARMATURE_DATA")
     row = layout.row(align=True).split(factor=split_factor, align=True)
     column = row.column(align=True)
@@ -161,7 +165,7 @@ def draw_vrm0_humanoid_optional_bones_layout(
     if not isinstance(armature_data, Armature):
         return
 
-    humanoid = armature_data.vrm_addon_extension.vrm0.humanoid
+    humanoid = get_armature_extension(armature_data).vrm0.humanoid
     split_factor = 0.2
 
     layout.label(text="VRM Optional Bones", icon="BONE_DATA")
@@ -308,17 +312,16 @@ def draw_vrm0_humanoid_optional_bones_layout(
 
 
 def draw_vrm0_humanoid_layout(
+    context: Context,
     armature: Object,
     layout: UILayout,
     humanoid: Vrm0HumanoidPropertyGroup,
 ) -> None:
-    if migrate(armature.name, defer=True):
+    if defer_migrate(armature.name):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return
-        Vrm0HumanoidPropertyGroup.update_all_node_candidates(
-            armature_data.name, defer=True
-        )
+        Vrm0HumanoidPropertyGroup.defer_update_all_node_candidates(armature_data.name)
 
     data = armature.data
     if not isinstance(data, Armature):
@@ -335,7 +338,7 @@ def draw_vrm0_humanoid_layout(
         column.prop_search(
             humanoid,
             "pose_library",
-            bpy.data,
+            context.blend_data,
             "actions",
             text=label,
             translate=False,
@@ -406,9 +409,10 @@ class VRM_PT_vrm0_humanoid_armature_object_property(Panel):
         if not isinstance(armature_data, Armature):
             return
         draw_vrm0_humanoid_layout(
+            context,
             active_object,
             self.layout,
-            armature_data.vrm_addon_extension.vrm0.humanoid,
+            get_armature_extension(armature_data).vrm0.humanoid,
         )
 
 
@@ -435,20 +439,20 @@ class VRM_PT_vrm0_humanoid_ui(Panel):
         if not isinstance(armature_data, Armature):
             return
         draw_vrm0_humanoid_layout(
-            armature, self.layout, armature_data.vrm_addon_extension.vrm0.humanoid
+            context,
+            armature,
+            self.layout,
+            get_armature_extension(armature_data).vrm0.humanoid,
         )
 
 
 def draw_vrm0_first_person_layout(
     armature: Object,
-    context: Context,
+    _context: Context,
     layout: UILayout,
     first_person: Vrm0FirstPersonPropertyGroup,
 ) -> None:
-    if migrate(armature.name, defer=True):
-        VrmAddonSceneExtensionPropertyGroup.check_mesh_object_names_and_update(
-            context.scene.name
-        )
+    defer_migrate(armature.name)
     armature_data = armature.data
     if not isinstance(armature_data, Armature):
         return
@@ -529,7 +533,7 @@ class VRM_PT_vrm0_first_person_armature_object_property(Panel):
         armature_data = active_object.data
         if not isinstance(armature_data, Armature):
             return
-        ext = armature_data.vrm_addon_extension
+        ext = get_armature_extension(armature_data)
         draw_vrm0_first_person_layout(
             active_object,
             context,
@@ -564,7 +568,7 @@ class VRM_PT_vrm0_first_person_ui(Panel):
             armature,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm0.first_person,
+            get_armature_extension(armature_data).vrm0.first_person,
         )
 
 
@@ -574,10 +578,7 @@ def draw_vrm0_blend_shape_master_layout(
     layout: UILayout,
     blend_shape_master: Vrm0BlendShapeMasterPropertyGroup,
 ) -> None:
-    if migrate(armature.name, defer=True):
-        VrmAddonSceneExtensionPropertyGroup.check_mesh_object_names_and_update(
-            context.scene.name
-        )
+    defer_migrate(armature.name)
     blend_data = context.blend_data
 
     (
@@ -646,11 +647,9 @@ def draw_vrm0_blend_shape_master_layout(
 
         if isinstance(bind, Vrm0BlendShapeBindPropertyGroup):
             bind_column = binds_box.column()
-            bind_column.prop_search(
+            bind_column.prop(
                 bind.mesh,
-                "mesh_object_name",
-                context.scene.vrm_addon_extension,
-                "mesh_object_names",
+                "bpy_object",
                 text="Mesh",
                 icon="OUTLINER_OB_MESH",
             )
@@ -717,16 +716,16 @@ def draw_vrm0_blend_shape_master_layout(
                 )
             else:
                 material = material_value.material
-                ext = material.vrm_addon_extension
-                node = search.vrm_shader_node(material)
+                ext = get_material_extension(material)
+                node, vrm_shader_name = search.vrm_shader_node(material)
                 if ext.mtoon1.enabled or (
-                    node and node.node_tree["SHADER"] == "MToon_unversioned"
+                    node and vrm_shader_name == "MToon_unversioned"
                 ):
                     if bpy.app.version >= (3, 2):
                         material_value_column.prop_search(
                             material_value,
                             "property_name",
-                            context.scene.vrm_addon_extension,
+                            get_scene_extension(context.scene),
                             "vrm0_material_mtoon0_property_names",
                             icon="PROPERTIES",
                             results_are_suggestions=True,
@@ -735,7 +734,7 @@ def draw_vrm0_blend_shape_master_layout(
                         material_value_column.prop_search(
                             material_value,
                             "property_name",
-                            context.scene.vrm_addon_extension,
+                            get_scene_extension(context.scene),
                             "vrm0_material_mtoon0_property_names",
                             icon="PROPERTIES",
                         )
@@ -743,7 +742,7 @@ def draw_vrm0_blend_shape_master_layout(
                     material_value_column.prop_search(
                         material_value,
                         "property_name",
-                        context.scene.vrm_addon_extension,
+                        get_scene_extension(context.scene),
                         "vrm0_material_gltf_property_names",
                         icon="PROPERTIES",
                         results_are_suggestions=True,
@@ -752,7 +751,7 @@ def draw_vrm0_blend_shape_master_layout(
                     material_value_column.prop_search(
                         material_value,
                         "property_name",
-                        context.scene.vrm_addon_extension,
+                        get_scene_extension(context.scene),
                         "vrm0_material_gltf_property_names",
                         icon="PROPERTIES",
                     )
@@ -808,7 +807,7 @@ class VRM_PT_vrm0_blend_shape_master_armature_object_property(Panel):
         armature_data = active_object.data
         if not isinstance(armature_data, Armature):
             return
-        ext = armature_data.vrm_addon_extension
+        ext = get_armature_extension(armature_data)
         draw_vrm0_blend_shape_master_layout(
             active_object, context, self.layout, ext.vrm0.blend_shape_master
         )
@@ -840,7 +839,7 @@ class VRM_PT_vrm0_blend_shape_master_ui(Panel):
             armature,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm0.blend_shape_master,
+            get_armature_extension(armature_data).vrm0.blend_shape_master,
         )
 
 
@@ -849,7 +848,7 @@ def draw_vrm0_secondary_animation_layout(
     layout: UILayout,
     secondary_animation: Vrm0SecondaryAnimationPropertyGroup,
 ) -> None:
-    migrate(armature.name, defer=True)
+    defer_migrate(armature.name)
     draw_vrm0_secondary_animation_bone_groups_layout(
         armature, layout, secondary_animation
     )
@@ -1095,7 +1094,7 @@ class VRM_PT_vrm0_secondary_animation_armature_object_property(Panel):
         armature_data = active_object.data
         if not isinstance(armature_data, Armature):
             return
-        ext = armature_data.vrm_addon_extension
+        ext = get_armature_extension(armature_data)
         draw_vrm0_secondary_animation_layout(
             active_object, self.layout, ext.vrm0.secondary_animation
         )
@@ -1126,7 +1125,7 @@ class VRM_PT_vrm0_secondary_animation_ui(Panel):
         draw_vrm0_secondary_animation_layout(
             armature,
             self.layout,
-            armature_data.vrm_addon_extension.vrm0.secondary_animation,
+            get_armature_extension(armature_data).vrm0.secondary_animation,
         )
 
 
@@ -1136,7 +1135,7 @@ def draw_vrm0_meta_layout(
     layout: UILayout,
     meta: Vrm0MetaPropertyGroup,
 ) -> None:
-    migrate(armature.name, defer=True)
+    defer_migrate(armature.name)
 
     thumbnail_column = layout.column()
     thumbnail_column.label(text="Thumbnail:")
@@ -1188,7 +1187,7 @@ class VRM_PT_vrm0_meta_armature_object_property(Panel):
         armature_data = active_object.data
         if not isinstance(armature_data, Armature):
             return
-        ext = armature_data.vrm_addon_extension
+        ext = get_armature_extension(armature_data)
         draw_vrm0_meta_layout(active_object, context, self.layout, ext.vrm0.meta)
 
 
@@ -1218,5 +1217,5 @@ class VRM_PT_vrm0_meta_ui(Panel):
             armature,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm0.meta,
+            get_armature_extension(armature_data).vrm0.meta,
         )

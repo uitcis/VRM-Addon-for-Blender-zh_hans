@@ -1,23 +1,13 @@
 import difflib
 import math
-from collections.abc import Mapping
 from json import dumps as json_dumps
 from typing import Union
 
 from . import convert
+from .convert import Json
 from .logging import get_logger
 
 logger = get_logger(__name__)
-
-Json = Union[
-    None,
-    bool,
-    int,
-    float,
-    str,
-    list["Json"],
-    dict[str, "Json"],
-]
 
 
 def make_json(v: object) -> Json:
@@ -31,19 +21,22 @@ def make_json(v: object) -> Json:
         return v
     if isinstance(v, str):
         return v
-    if isinstance(v, Mapping):
-        result: dict[str, Json] = {}
-        for key, value in v.items():
+
+    mapping = convert.mapping_or_none(v)
+    if mapping is not None:
+        dict_result: dict[str, Json] = {}
+        for key, value in mapping.items():
             if isinstance(key, str):
-                result[key] = make_json(value)
+                dict_result[key] = make_json(value)
                 continue
-            logger.warning(f"{key} {type(key)} is unrecognized type for dict key")
-        return result
+            logger.warning("%s %s is unrecognized type for dict key", key, type(key))
+        return dict_result
+
     iterator = convert.iterator_or_none(v)
     if iterator is not None:
         return [make_json(x) for x in iterator]
 
-    logger.warning(f"{v} {type(v)} is unrecognized type")
+    logger.warning("%s %s is unrecognized type", v, type(v))
     return None
 
 

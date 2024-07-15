@@ -8,12 +8,14 @@ logger = get_logger(__name__)
 
 
 @persistent
-def frame_change_pre(_dummy: object) -> None:
+def frame_change_pre(_unused: object) -> None:
     Vrm0BlendShapeGroupPropertyGroup.frame_change_post_shape_key_updates.clear()
 
 
 @persistent
-def frame_change_post(_dummy: object) -> None:
+def frame_change_post(_unused: object) -> None:
+    context = bpy.context
+
     for (
         (
             shape_key_name,
@@ -21,7 +23,7 @@ def frame_change_post(_dummy: object) -> None:
         ),
         value,
     ) in Vrm0BlendShapeGroupPropertyGroup.frame_change_post_shape_key_updates.items():
-        shape_key = bpy.data.shape_keys.get(shape_key_name)
+        shape_key = context.blend_data.shape_keys.get(shape_key_name)
         if not shape_key:
             continue
         key_blocks = shape_key.key_blocks

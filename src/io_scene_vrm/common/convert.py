@@ -1,6 +1,18 @@
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from sys import float_info
-from typing import Optional
+from typing import Optional, Union
+
+from . import convert_any
+
+Json = Union[
+    None,
+    bool,
+    int,
+    float,
+    str,
+    list["Json"],
+    dict[str, "Json"],
+]
 
 
 def iterator_or_none(v: object) -> Optional[Iterator[object]]:
@@ -8,15 +20,37 @@ def iterator_or_none(v: object) -> Optional[Iterator[object]]:
         # "isinstance(v, Iterable)" doesn't work.
         # https://github.com/python/cpython/blob/3.9/Doc/library/collections.abc.rst?plain=1#L126-L127
         iterator = iter(v)  # type: ignore[call-overload]
-        if isinstance(iterator, Iterator):  # make type checkers happy
-            return iterator
     except TypeError:
-        pass
-    return None
+        return None
+    return convert_any.iterator_to_object_iterator(iterator)
+
+
+def sequence_or_none(
+    sequence_object: object,
+) -> Optional[Sequence[object]]:
+    sequence = sequence_object
+    if not isinstance(sequence, Sequence):
+        return None
+    iterator = iterator_or_none(sequence_object)
+    if iterator is None:
+        return None
+    return list(iterator)
+
+
+def mapping_or_none(
+    mapping_object: object,
+) -> Optional[Mapping[object, object]]:
+    mapping = mapping_object
+    if not isinstance(mapping, Mapping):
+        return None
+    key_iterator = iterator_or_none(mapping_object)
+    if key_iterator is None:
+        return None
+    return {key: convert_any.to_object(mapping[key]) for key in key_iterator}
 
 
 def vrm_json_vector3_to_tuple(
-    value: object,
+    value: Json,
 ) -> Optional[tuple[float, float, float]]:
     if not isinstance(value, Mapping):
         return None
@@ -32,11 +66,10 @@ def vrm_json_vector3_to_tuple(
     return (float(x), float(y), float(z))
 
 
-def vrm_json_curve_to_list(curve: object) -> Optional[list[float]]:
-    iterator = iterator_or_none(curve)
-    if iterator is None:
+def vrm_json_curve_to_list(curve: Json) -> Optional[list[float]]:
+    if not isinstance(curve, list):
         return None
-    values = [float(v) if isinstance(v, (int, float)) else 0 for v in iterator]
+    values = [float(v) if isinstance(v, (int, float)) else 0 for v in curve]
     while len(values) < 8:
         values.append(0)
     while len(values) > 8:
@@ -44,15 +77,12 @@ def vrm_json_curve_to_list(curve: object) -> Optional[list[float]]:
     return values
 
 
-def vrm_json_array_to_float_vector(json: object, defaults: list[float]) -> list[float]:
-    if isinstance(json, str):
+def vrm_json_array_to_float_vector(
+    input_values: Json, defaults: list[float]
+) -> list[float]:
+    if not isinstance(input_values, list):
         return defaults
 
-    iterator = iterator_or_none(json)
-    if iterator is None:
-        return defaults
-
-    input_values = list(iterator)
     output_values: list[float] = []
     for index, default in enumerate(defaults):
         if index >= len(input_values):

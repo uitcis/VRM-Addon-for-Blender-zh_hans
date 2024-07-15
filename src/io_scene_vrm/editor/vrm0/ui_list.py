@@ -1,6 +1,6 @@
-import bpy
 from bpy.types import Context, Mesh, UILayout, UIList
 
+from ..extension import get_armature_extension
 from ..property_group import BonePropertyGroup, StringPropertyGroup
 from .property_group import (
     Vrm0BlendShapeBindPropertyGroup,
@@ -19,7 +19,7 @@ class VRM_UL_vrm0_first_person_mesh_annotation(UIList):
 
     def draw_item(
         self,
-        context: Context,
+        _context: Context,
         layout: UILayout,
         first_person: object,
         mesh_annotation: object,
@@ -46,11 +46,9 @@ class VRM_UL_vrm0_first_person_mesh_annotation(UIList):
 
         row = layout.split(factor=0.6, align=True)
         if index == first_person.active_mesh_annotation_index:
-            row.prop_search(
+            row.prop(
                 mesh_annotation.mesh,
-                "mesh_object_name",
-                context.scene.vrm_addon_extension,
-                "mesh_object_names",
+                "bpy_object",
                 icon=icon,
                 text="",
                 translate=False,
@@ -119,7 +117,7 @@ class VRM_UL_vrm0_secondary_animation_group_bone(UIList):
 
     def draw_item(
         self,
-        _context: Context,
+        context: Context,
         layout: UILayout,
         bone_group: object,
         bone: object,
@@ -133,7 +131,7 @@ class VRM_UL_vrm0_secondary_animation_group_bone(UIList):
             return
         if not isinstance(bone, BonePropertyGroup):
             return
-        armature = bpy.data.armatures.get(bone.armature_data_name)
+        armature = context.blend_data.armatures.get(bone.armature_data_name)
         if armature is None:
             return
 
@@ -166,7 +164,7 @@ class VRM_UL_vrm0_secondary_animation_group_collider_group(UIList):
 
     def draw_item(
         self,
-        _context: Context,
+        context: Context,
         layout: UILayout,
         bone_group: object,
         collider_group: object,
@@ -182,8 +180,8 @@ class VRM_UL_vrm0_secondary_animation_group_collider_group(UIList):
             return
 
         secondary_animation = None
-        for armature in bpy.data.armatures:
-            ext = armature.vrm_addon_extension.vrm0
+        for armature in context.blend_data.armatures:
+            ext = get_armature_extension(armature).vrm0
             if any(bone_group == bg for bg in ext.secondary_animation.bone_groups):
                 secondary_animation = ext.secondary_animation
                 break

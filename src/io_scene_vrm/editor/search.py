@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, Union
 
-import bpy
 from bpy.app.translations import pgettext
 from bpy.types import (
     Armature,
@@ -21,6 +20,7 @@ from bpy.types import (
 )
 
 from ..common.logging import get_logger
+from .extension import get_armature_extension
 
 logger = get_logger(__name__)
 
@@ -33,8 +33,8 @@ MESH_CONVERTIBLE_OBJECT_TYPES = [
 ]
 
 
-def export_materials(objects: list[Object]) -> list[Material]:
-    result = []
+def export_materials(context: Context, objects: list[Object]) -> list[Material]:
+    result: list[Material] = []
     for obj in objects:
         if obj.type not in MESH_CONVERTIBLE_OBJECT_TYPES:
             continue
@@ -44,14 +44,14 @@ def export_materials(objects: list[Object]) -> list[Material]:
             for material_ref in mesh_convertible.materials:
                 if not isinstance(material_ref, Material):
                     continue
-                material = bpy.data.materials.get(material_ref.name)
+                material = context.blend_data.materials.get(material_ref.name)
                 if not isinstance(material, Material):
                     continue
                 if material not in result:
                     result.append(material)
         else:
             logger.error(
-                f"Unexpected mesh convertible object type: {type(mesh_convertible)}"
+                "Unexpected mesh convertible object type: %s", type(mesh_convertible)
             )
 
         for material_slot in obj.material_slots:
@@ -60,7 +60,7 @@ def export_materials(objects: list[Object]) -> list[Material]:
             material_ref = material_slot.material
             if not material_ref:
                 continue
-            material = bpy.data.materials.get(material_ref.name)
+            material = context.blend_data.materials.get(material_ref.name)
             if not isinstance(material, Material):
                 continue
             if material not in result:
@@ -71,9 +71,9 @@ def export_materials(objects: list[Object]) -> list[Material]:
 
 def vrm_shader_node(
     material: Material,
-) -> Optional[ShaderNodeGroup]:
+) -> tuple[Optional[ShaderNodeGroup], Optional[str]]:
     if not material.node_tree or not material.node_tree.nodes:
-        return None
+        return (None, None)
     for node in material.node_tree.nodes:
         if not isinstance(node, ShaderNodeOutputMaterial):
             continue
@@ -87,20 +87,24 @@ def vrm_shader_node(
         group_node = link.from_node
         if not isinstance(group_node, ShaderNodeGroup):
             continue
-        if "SHADER" not in group_node.node_tree:
+        node_tree = group_node.node_tree
+        if not node_tree:
             continue
-        return group_node
-    return None
+        vrm_shader_name = node_tree.get("SHADER")
+        if not isinstance(vrm_shader_name, str):
+            continue
+        return (group_node, vrm_shader_name)
+    return (None, None)
 
 
 def shader_nodes_and_materials(
     materials: list[Material],
-) -> list[tuple[ShaderNodeGroup, Material]]:
-    result = []
+) -> list[tuple[ShaderNodeGroup, str, Material]]:
+    result: list[tuple[ShaderNodeGroup, str, Material]] = []
     for material in materials:
-        node = vrm_shader_node(material)
-        if node:
-            result.append((node, material))
+        node, vrm_shader_name = vrm_shader_node(material)
+        if node is not None and vrm_shader_name is not None:
+            result.append((node, vrm_shader_name, material))
     return result
 
 
@@ -170,20 +174,22 @@ def object_distance(
 
 
 def armature_exists(context: Context) -> bool:
-    return any(armature.users for armature in bpy.data.armatures) and any(
+    return any(armature.users for armature in context.blend_data.armatures) and any(
         obj.type == "ARMATURE" for obj in context.blend_data.objects
     )
 
 
 def current_armature_is_vrm0(context: Context) -> bool:
     live_armature_datum = [
-        armature_data for armature_data in bpy.data.armatures if armature_data.users
+        armature_data
+        for armature_data in context.blend_data.armatures
+        if armature_data.users
     ]
     if not live_armature_datum:
         return False
     if all(
         hasattr(armature_data, "vrm_addon_extension")
-        and armature_data.vrm_addon_extension.is_vrm0()
+        and get_armature_extension(armature_data).is_vrm0()
         for armature_data in live_armature_datum
     ) and any(obj.type == "ARMATURE" for obj in context.blend_data.objects):
         return True
@@ -193,18 +199,20 @@ def current_armature_is_vrm0(context: Context) -> bool:
     armature_data = armature.data
     if not isinstance(armature_data, Armature):
         return False
-    return armature_data.vrm_addon_extension.is_vrm0()
+    return get_armature_extension(armature_data).is_vrm0()
 
 
 def current_armature_is_vrm1(context: Context) -> bool:
     live_armature_datum = [
-        armature_data for armature_data in bpy.data.armatures if armature_data.users
+        armature_data
+        for armature_data in context.blend_data.armatures
+        if armature_data.users
     ]
     if not live_armature_datum:
         return False
     if all(
         hasattr(armature_data, "vrm_addon_extension")
-        and armature_data.vrm_addon_extension.is_vrm1()
+        and get_armature_extension(armature_data).is_vrm1()
         for armature_data in live_armature_datum
     ) and any(obj.type == "ARMATURE" for obj in context.blend_data.objects):
         return True
@@ -214,12 +222,12 @@ def current_armature_is_vrm1(context: Context) -> bool:
     armature_data = armature.data
     if not isinstance(armature_data, Armature):
         return False
-    return armature_data.vrm_addon_extension.is_vrm1()
+    return get_armature_extension(armature_data).is_vrm1()
 
 
 def multiple_armatures_exist(context: Context) -> bool:
     first_data_exists = False
-    for data in bpy.data.armatures:
+    for data in context.blend_data.armatures:
         if not data.users:
             continue
         if not first_data_exists:
@@ -275,6 +283,7 @@ def current_armature(context: Context) -> Optional[Object]:
 def export_objects(
     context: Context,
     armature_object_name: Optional[str],
+    *,
     export_invisibles: bool,
     export_only_selections: bool,
     export_lights: bool,
@@ -640,7 +649,7 @@ def active_object_is_vrm1_armature(context: Context) -> bool:
     armature_data = active_object.data
     if not isinstance(armature_data, Armature):
         return False
-    return armature_data.vrm_addon_extension.is_vrm1()
+    return get_armature_extension(armature_data).is_vrm1()
 
 
 def active_object_is_vrm0_armature(context: Context) -> bool:
@@ -652,4 +661,4 @@ def active_object_is_vrm0_armature(context: Context) -> bool:
     armature_data = active_object.data
     if not isinstance(armature_data, Armature):
         return False
-    return armature_data.vrm_addon_extension.is_vrm0()
+    return get_armature_extension(armature_data).is_vrm0()

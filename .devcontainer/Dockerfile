@@ -132,7 +132,7 @@ RUN /usr/local/bin/pip3 install numpy requests zstandard
 RUN if [ "$(uname -m)" != "x86_64" ]; then \
         mkdir -p blender/blender \
         && pushd blender/blender \
-        && curl --fail --show-error --location https://download.blender.org/source/blender-3.6.11.tar.xz \
+        && curl --fail --show-error --location https://download.blender.org/source/blender-3.6.12.tar.xz \
             | tar Jxf - --strip-components=1 \
         && ./build_files/build_environment/install_linux_packages.py \
         && make NPROCS=1 bpy \
@@ -142,7 +142,7 @@ RUN if [ "$(uname -m)" != "x86_64" ]; then \
         && popd \
         && popd \
         && rm -fr blender \
-        && python3 -c 'import bpy; assert(bpy.app.version == (3, 6, 11))' \
+        && python3 -c 'import bpy; assert(bpy.app.version == (3, 6, 12))' \
     ; fi
 
 RUN useradd --create-home --user-group --shell /bin/bash developer \
@@ -155,6 +155,10 @@ WORKDIR /home/developer
 ENV BLENDER_VRM_LOGGING_LEVEL_DEBUG=yes
 ENV BLENDER_VRM_DEVCONTAINER_SPECIAL_WORKAROUNDS=yes
 ENV PATH=/home/developer/.local/bin:$PATH
+# JetBrains製品はXDGのパスが自動で変更され、Poetry関連パスも影響を受けるためvirtualenvなどが予期せず消えたりする。それを防ぐためにパスを固定。
+ENV POETRY_CONFIG_DIR=/home/developer/.config/pypoetry
+ENV POETRY_DATA_DIR=/home/developer/.local/share/pypoetry
+ENV POETRY_CACHE_DIR=/home/developer/.cache/pypoetry
 
 # JetBrains製品は自動で `~/.cache` フォルダを作成するが、それだとフォルダの権限がroot:rootになる。
 # poetryなどがエラーになるため、あらかじめ作っておく。
@@ -162,9 +166,3 @@ RUN mkdir -p .cache
 
 RUN curl --fail --show-error --location https://install.python-poetry.org \
         | /usr/local/bin/python3 -
-
-COPY --chown=developer:developer --chmod=700 install_hugo.sh .
-RUN ./install_hugo.sh
-
-COPY --chown=developer:developer --chmod=700 install_hadolint.sh .
-RUN ./install_hadolint.sh

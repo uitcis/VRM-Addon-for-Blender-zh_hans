@@ -9,7 +9,7 @@ from typing import Optional, Union
 
 from ..common import deep
 from ..common.binary_reader import BinaryReader
-from ..common.deep import Json
+from ..common.convert import Json
 from ..common.gltf import parse_glb
 from ..common.logging import get_logger
 from .license_validation import validate_license
@@ -194,12 +194,11 @@ def remove_unsafe_path_chars(filename: str) -> str:
     return safe_filename
 
 
-#  "accessorの順に" データを読み込んでリストにしたものを返す
 def decode_bin(
     json_dict: dict[str, Json], binary: bytes
 ) -> list[list[Union[int, float, list[int], list[float]]]]:
+    """Decode bin and index by accessor indices."""
     br = BinaryReader(binary)
-    # This list indexed by accessor index
     decoded_binary: list[list[Union[int, float, list[int], list[float]]]] = []
     buffer_view_dicts = json_dict.get("bufferViews")
     if not isinstance(buffer_view_dicts, list):
@@ -216,13 +215,13 @@ def decode_bin(
             continue
         type_num = type_num_dict.get(accessor_type)
         if not isinstance(type_num, int):
-            logger.warning(f"Unrecognized accessor type: {accessor_type}")
+            logger.warning("Unrecognized accessor type: %s", accessor_type)
             continue
         buffer_view_index = accessor_dict.get("bufferView")
         if not isinstance(buffer_view_index, int):
             logger.warning(
-                f"accessors[{accessor_index}] doesn't have bufferView "
-                + "that is not implemented yet"
+                "accessors[%s] doesn't have bufferView that is not implemented yet",
+                accessor_index,
             )
             decoded_binary.append([])
             continue
@@ -267,7 +266,6 @@ class VrmParser:
     json_dict: dict[str, Json] = field(init=False, default_factory=dict)
 
     def parse(self) -> ParseResult:
-        # bin chunkは一つだけであることを期待
         json_dict, _ = parse_glb(self.filepath.read_bytes())
         self.json_dict = json_dict
 
@@ -331,7 +329,6 @@ class VrmParser:
             return
         parse_result.hips_node_index = hips_node_index
 
-    # ここからマテリアル
     def material_read(self, parse_result: ParseResult) -> None:
         material_dicts = self.json_dict.get("materials")
         if not isinstance(material_dicts, list):

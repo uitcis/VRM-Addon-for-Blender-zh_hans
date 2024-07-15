@@ -1,9 +1,9 @@
-import bpy
-from bpy.types import Armature, Material, Object
+from bpy.types import Armature, Context, Material, Object
 from idprop.types import IDPropertyGroup
 from mathutils import Vector
 
-from ...common import convert, shader
+from ...common import convert, ops, shader
+from ..extension import get_armature_extension
 from .property_group import (
     Vrm1ExpressionPropertyGroup,
     Vrm1ExpressionsPropertyGroup,
@@ -180,14 +180,14 @@ def migrate_old_expressions_layout(expressions: Vrm1ExpressionsPropertyGroup) ->
         migrate_old_expression_layout(old_expression, expression)
 
 
-def migrate_pose(armature_data: Armature) -> None:
-    ext = armature_data.vrm_addon_extension
+def migrate_pose(context: Context, armature_data: Armature) -> None:
+    ext = get_armature_extension(armature_data)
     if tuple(ext.addon_version) >= (2, 20, 34):
         return
 
     humanoid = ext.vrm1.humanoid
     action = humanoid.pose_library
-    if action and action.name in bpy.data.actions:
+    if action and action.name in context.blend_data.actions:
         humanoid.pose = humanoid.POSE_ITEM_VALUE_CUSTOM_POSE
     elif armature_data.pose_position == "REST":
         humanoid.pose = humanoid.POSE_ITEM_VALUE_REST_POSITION_POSE
@@ -195,7 +195,7 @@ def migrate_pose(armature_data: Armature) -> None:
         humanoid.pose = humanoid.POSE_ITEM_VALUE_CURRENT_POSE
 
 
-def migrate(vrm1: Vrm1PropertyGroup, armature: Object) -> None:
+def migrate(context: Context, vrm1: Vrm1PropertyGroup, armature: Object) -> None:
     armature_data = armature.data
     if not isinstance(armature_data, Armature):
         return
@@ -203,30 +203,30 @@ def migrate(vrm1: Vrm1PropertyGroup, armature: Object) -> None:
     human_bones = vrm1.humanoid.human_bones
     human_bones.last_bone_names.clear()
     Vrm1HumanBonesPropertyGroup.fixup_human_bones(armature)
-    Vrm1HumanBonesPropertyGroup.update_all_node_candidates(armature_data.name)
+    Vrm1HumanBonesPropertyGroup.update_all_node_candidates(context, armature_data.name)
 
     if human_bones.initial_automatic_bone_assignment:
         human_bones.initial_automatic_bone_assignment = False
         human_bone_name_to_human_bone = human_bones.human_bone_name_to_human_bone()
         if all(not b.node.bone_name for b in human_bone_name_to_human_bone.values()):
-            bpy.ops.vrm.assign_vrm1_humanoid_human_bones_automatically(
+            ops.vrm.assign_vrm1_humanoid_human_bones_automatically(
                 armature_name=armature.name
             )
 
-    if tuple(armature_data.vrm_addon_extension.addon_version) <= (2, 14, 10):
-        ext = armature_data.vrm_addon_extension
+    if tuple(get_armature_extension(armature_data).addon_version) <= (2, 14, 10):
+        ext = get_armature_extension(armature_data)
         head_bone_name = ext.vrm1.humanoid.human_bones.head.node.bone_name
         head_bone = armature_data.bones.get(head_bone_name)
         if head_bone:
-            look_at = armature_data.vrm_addon_extension.vrm1.look_at
+            look_at = get_armature_extension(armature_data).vrm1.look_at
             world_translation = (
                 armature.matrix_world @ head_bone.matrix_local
             ).to_quaternion() @ Vector(look_at.offset_from_head_bone)
             look_at.offset_from_head_bone = list(world_translation)
 
-    if tuple(armature_data.vrm_addon_extension.addon_version) <= (2, 15, 5):
+    if tuple(get_armature_extension(armature_data).addon_version) <= (2, 15, 5):
         # Apply lower limit value
-        look_at = armature_data.vrm_addon_extension.vrm1.look_at
+        look_at = get_armature_extension(armature_data).vrm1.look_at
         look_at.range_map_horizontal_inner.input_max_value = (
             look_at.range_map_horizontal_inner.input_max_value
         )
@@ -240,32 +240,32 @@ def migrate(vrm1: Vrm1PropertyGroup, armature: Object) -> None:
             look_at.range_map_vertical_up.input_max_value
         )
 
-    if tuple(armature_data.vrm_addon_extension.addon_version) < (2, 18, 0):
+    if tuple(get_armature_extension(armature_data).addon_version) < (2, 18, 0):
         migrate_old_expressions_layout(
-            armature_data.vrm_addon_extension.vrm1.expressions
+            get_armature_extension(armature_data).vrm1.expressions
         )
 
-    if tuple(armature_data.vrm_addon_extension.addon_version) < (2, 20, 0):
-        look_at = armature_data.vrm_addon_extension.vrm1.look_at
+    if tuple(get_armature_extension(armature_data).addon_version) < (2, 20, 0):
+        look_at = get_armature_extension(armature_data).vrm1.look_at
         look_at.offset_from_head_bone = (
             look_at.offset_from_head_bone[0],
             look_at.offset_from_head_bone[2],
             -look_at.offset_from_head_bone[1],
         )
 
-    migrate_pose(armature_data)
+    migrate_pose(context, armature_data)
 
     # Expressionのプリセットに名前を設定する
     # 管理上は無くてもよいが、アニメーションキーフレームに表示されるので設定しておきたい
-    expressions = armature_data.vrm_addon_extension.vrm1.expressions
+    expressions = get_armature_extension(armature_data).vrm1.expressions
     preset_name_to_expression_dict = expressions.preset.name_to_expression_dict()
     for preset_name, preset_expression in preset_name_to_expression_dict.items():
         if preset_expression.name != preset_name:
             preset_expression.name = preset_name
 
     Vrm1HumanBonesPropertyGroup.update_all_node_candidates(
+        context,
         armature_data.name,
-        defer=False,
         force=True,
     )
-    bpy.ops.vrm.update_vrm1_expression_ui_list_elements()
+    ops.vrm.update_vrm1_expression_ui_list_elements()

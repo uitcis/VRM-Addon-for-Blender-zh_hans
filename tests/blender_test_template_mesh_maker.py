@@ -2,9 +2,12 @@ from os import environ, getenv
 from pathlib import Path
 
 import bpy
+from bpy.types import Context
+
+from io_scene_vrm.common import ops
 
 
-def test() -> None:
+def test(context: Context) -> None:
     environ["BLENDER_VRM_USE_TEST_EXPORTER_VERSION"] = "true"
 
     repository_root_dir = Path(__file__).resolve(strict=True).parent.parent
@@ -26,16 +29,16 @@ def test() -> None:
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
-    while bpy.data.collections:
-        bpy.data.collections.remove(bpy.data.collections[0])
+    while context.blend_data.collections:
+        context.blend_data.collections.remove(context.blend_data.collections[0])
 
-    bpy.ops.icyp.make_basic_armature(WIP_with_template_mesh=True)
-    assert bpy.ops.vrm.model_validate() == {"FINISHED"}
+    ops.icyp.make_basic_armature(wip_with_template_mesh=True)
+    assert ops.vrm.model_validate() == {"FINISHED"}
 
     actual_path = temp_dir_path / vrm
     if actual_path.exists():
         actual_path.unlink()
-    bpy.ops.export_scene.vrm(filepath=str(actual_path))
+    ops.export_scene.vrm(filepath=str(actual_path))
 
     # TODO: compare bin
     actual_size = actual_path.stat().st_size
@@ -46,4 +49,4 @@ def test() -> None:
 
 
 if __name__ == "__main__":
-    test()
+    test(bpy.context)

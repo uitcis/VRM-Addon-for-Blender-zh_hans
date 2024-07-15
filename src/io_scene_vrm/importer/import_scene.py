@@ -17,7 +17,7 @@ from bpy.types import (
 )
 from bpy_extras.io_utils import ImportHelper
 
-from ..common import version
+from ..common import ops, version
 from ..common.logging import get_logger
 from ..common.preferences import (
     ImportPreferencesProtocol,
@@ -27,10 +27,13 @@ from ..common.preferences import (
     get_preferences,
 )
 from ..editor import search
+from ..editor.extension import get_armature_extension
 from ..editor.ops import VRM_OT_open_url_in_web_browser, layout_operator
 from ..editor.property_group import CollectionPropertyProtocol, StringPropertyGroup
-from .gltf2_addon_vrm_importer import Gltf2AddonVrmImporter
+from .abstract_base_vrm_importer import AbstractBaseVrmImporter
 from .license_validation import LicenseConfirmationRequiredError
+from .vrm0_importer import Vrm0Importer
+from .vrm1_importer import Vrm1Importer
 from .vrm_animation_importer import VrmAnimationImporter
 from .vrm_parser import VrmParser
 
@@ -120,7 +123,7 @@ class IMPORT_SCENE_OT_vrm(Operator, ImportHelper):
 
         license_error = None
         try:
-            return create_blend_model(
+            return import_vrm(
                 filepath,
                 self,
                 context,
@@ -137,7 +140,7 @@ class IMPORT_SCENE_OT_vrm(Operator, ImportHelper):
             execution_context = "EXEC_DEFAULT"
             import_anyway = True
 
-        return bpy.ops.wm.vrm_license_warning(
+        return ops.wm.vrm_license_warning(
             execution_context,
             import_anyway=import_anyway,
             license_confirmations=license_error.license_confirmations(),
@@ -150,7 +153,7 @@ class IMPORT_SCENE_OT_vrm(Operator, ImportHelper):
         copy_import_preferences(source=get_preferences(context), destination=self)
 
         if "gltf" not in dir(bpy.ops.import_scene):
-            return bpy.ops.wm.vrm_gltf2_addon_disabled_warning("INVOKE_DEFAULT")
+            return ops.wm.vrm_gltf2_addon_disabled_warning("INVOKE_DEFAULT")
         return ImportHelper.invoke(self, context, event)
 
     def draw(self, _context: Context) -> None:
@@ -256,7 +259,7 @@ class WM_OT_vrm_license_confirmation(Operator):
             return {"CANCELLED"}
         if not self.import_anyway:
             return {"CANCELLED"}
-        return create_blend_model(
+        return import_vrm(
             filepath,
             self,
             context,
@@ -314,10 +317,11 @@ class WM_OT_vrm_license_confirmation(Operator):
         set_armature_bone_shape_to_default: bool  # type: ignore[no-redef]
 
 
-def create_blend_model(
+def import_vrm(
     filepath: Path,
     preferences: ImportPreferencesProtocol,
     context: Context,
+    *,
     license_validation: bool,
 ) -> set[str]:
     parse_result = VrmParser(
@@ -327,11 +331,21 @@ def create_blend_model(
         license_validation=license_validation,
     ).parse()
 
-    Gltf2AddonVrmImporter(
-        context,
-        parse_result,
-        preferences,
-    ).import_vrm()
+    if parse_result.spec_version_number >= (1,):
+        vrm_importer: AbstractBaseVrmImporter = Vrm1Importer(
+            context,
+            parse_result,
+            preferences,
+        )
+    else:
+        vrm_importer = Vrm0Importer(
+            context,
+            parse_result,
+            preferences,
+        )
+
+    vrm_importer.import_vrm()
+
     return {"FINISHED"}
 
 
@@ -385,7 +399,7 @@ class IMPORT_SCENE_OT_vrma(Operator, ImportHelper):
         if WM_OT_vrma_import_prerequisite.detect_errors(
             context, self.armature_object_name
         ):
-            return bpy.ops.wm.vrma_import_prerequisite(
+            return ops.wm.vrma_import_prerequisite(
                 "INVOKE_DEFAULT",
                 armature_object_name=self.armature_object_name,
             )
@@ -413,7 +427,7 @@ class WM_OT_vrma_import_prerequisite(Operator):
 
     @staticmethod
     def detect_errors(context: Context, armature_object_name: str) -> list[str]:
-        error_messages = []
+        error_messages: list[str] = []
 
         if not armature_object_name:
             armature = search.current_armature(context)
@@ -429,8 +443,8 @@ class WM_OT_vrma_import_prerequisite(Operator):
             error_messages.append(pgettext("Armature not found"))
             return error_messages
 
-        ext = armature_data.vrm_addon_extension
-        if armature_data.vrm_addon_extension.is_vrm1():
+        ext = get_armature_extension(armature_data)
+        if get_armature_extension(armature_data).is_vrm1():
             humanoid = ext.vrm1.humanoid
             if not humanoid.human_bones.all_required_bones_are_assigned():
                 error_messages.append(pgettext("Please assign required human bones"))
@@ -440,7 +454,7 @@ class WM_OT_vrma_import_prerequisite(Operator):
         return error_messages
 
     def execute(self, _context: Context) -> set[str]:
-        return bpy.ops.import_scene.vrma(
+        return ops.import_scene.vrma(
             "INVOKE_DEFAULT", armature_object_name=self.armature_object_name
         )
 

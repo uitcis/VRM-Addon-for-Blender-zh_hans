@@ -20,6 +20,7 @@ jobs:
           - https://mirrors.ocf.berkeley.edu/blender/release/Blender2.93/blender-2.93.9-windows-x64.zip
           - https://mirrors.ocf.berkeley.edu/blender/release/Blender3.3/blender-3.3.0-windows-x64.zip
           - https://mirrors.ocf.berkeley.edu/blender/release/Blender3.6/blender-3.6.0-windows-x64.zip
+          - https://cdn.builder.blender.org/download/daily/blender-4.2.0-candidate+v42.0afee246ea6b-windows.amd64-release.zip
     env:
       BLENDER_VRM_EXCLUDE_GUI_TEST: true
     steps:
@@ -67,6 +68,8 @@ jobs:
           - https://mirrors.ocf.berkeley.edu/blender/release/Blender2.93/blender-2.93.9-macos-arm64.dmg
           - https://mirrors.ocf.berkeley.edu/blender/release/Blender3.3/blender-3.3.0-macos-arm64.dmg
           - https://mirrors.ocf.berkeley.edu/blender/release/Blender3.6/blender-3.6.0-macos-arm64.dmg
+          - https://cdn.builder.blender.org/download/daily/blender-4.2.0-candidate+v42.0afee246ea6b-darwin.arm64-release.dmg
+          - https://cdn.builder.blender.org/download/daily/blender-4.2.0-candidate+v42.0afee246ea6b-darwin.x86_64-release.dmg
     env:
       BLENDER_VRM_EXCLUDE_GUI_TEST: true
     steps:
@@ -88,6 +91,40 @@ jobs:
           cp -fr /Volumes/Blender/Blender.app /Applications
           /Applications/Blender.app/Contents/MacOS/blender --background -noaudio --python-exit-code 1 --python tools/generate_dynamic_tests.py
           /Applications/Blender.app/Contents/MacOS/blender --background -noaudio --python-exit-code 1 --python tools/unittest_discover.py
+      - name: Archive failed io test result
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: VRMs
+          path: tests/resources/vrm/*/temp
+
+  test-linux:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        archive_url:
+          - https://cdn.builder.blender.org/download/daily/blender-4.2.0-candidate+v42.0afee246ea6b-linux.x86_64-release.tar.xz
+    env:
+      BLENDER_VRM_EXCLUDE_GUI_TEST: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Cache archive
+        id: cache-archive
+        uses: actions/cache@v4
+        with:
+          path: blender.dmg
+          key: ${{ matrix.archive_url }}-archive-3
+      - name: Download archive
+        if: steps.cache-archive.outputs.cache-hit != 'true'
+        run: curl -fsLS --retry 5 --retry-all-errors "${{ matrix.archive_url }}" -o "$HOME/blender.tar.xz"
+      - name: Test
+        run: |
+          mkdir -p "$HOME/.local/blender"
+          tar -x --strip-components=1 -f "$HOME/blender.tar.xz" -C "$HOME/.local/blender"
+          "$HOME/.local/blender/blender" --background -noaudio --python-exit-code 1 --python tools/generate_dynamic_tests.py
+          "$HOME/.local/blender/blender" --background -noaudio --python-exit-code 1 --python tools/unittest_discover.py
       - name: Archive failed io test result
         uses: actions/upload-artifact@v4
         if: failure()

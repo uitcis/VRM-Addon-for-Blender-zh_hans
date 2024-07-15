@@ -6,6 +6,7 @@ from sys import float_info
 from typing import TYPE_CHECKING, Optional
 
 import bpy
+from bpy.app.translations import pgettext
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy.types import (
     Context,
@@ -21,10 +22,12 @@ from bpy.types import (
 )
 from bpy_extras import view3d_utils
 from bpy_extras.io_utils import ImportHelper
+from bpy_extras.node_shader_utils import PrincipledBSDFWrapper
 
 from ...common import convert, shader
 from ...common.logging import get_logger
 from .. import search
+from ..extension import get_material_extension
 from .property_group import (
     Mtoon0ReceiveShadowTexturePropertyGroup,
     Mtoon0ShadingGradeTexturePropertyGroup,
@@ -252,7 +255,7 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
     )
 
     def execute(self, context: Context) -> set[str]:
-        material = bpy.data.materials.get(self.material_name)
+        material = context.blend_data.materials.get(self.material_name)
         if not isinstance(material, Material):
             return {"CANCELLED"}
         self.convert_material_to_mtoon1(context, material)
@@ -260,6 +263,7 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
 
     @staticmethod
     def assign_mtoon_unversioned_image(
+        context: Context,
         texture_info: Mtoon1TextureInfoPropertyGroup,
         image_name_and_sampler_type: Optional[tuple[str, int, int]],
         uv_offset: tuple[float, float],
@@ -272,7 +276,7 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
             return
 
         image_name, wrap_number, filter_number = image_name_and_sampler_type
-        image = bpy.data.images.get(image_name)
+        image = context.blend_data.images.get(image_name)
         if not image:
             return
 
@@ -296,18 +300,74 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
             texture_info.index.sampler.wrap_t = wrap
 
     def convert_material_to_mtoon1(self, context: Context, material: Material) -> None:
-        node = search.vrm_shader_node(material)
-        if isinstance(node, Node) and node.node_tree["SHADER"] == "MToon_unversioned":
+        node, vrm_shader_name = search.vrm_shader_node(material)
+        if isinstance(node, Node) and vrm_shader_name == "MToon_unversioned":
             self.convert_mtoon_unversioned_to_mtoon1(context, material, node)
             return
 
-        addon_version = tuple(material.vrm_addon_extension.mtoon1.addon_version)
+        principled_bsdf = PrincipledBSDFWrapper(material)
+        if not principled_bsdf.node_principled_bsdf:
+            reset_shader_node_group(
+                context,
+                material,
+                reset_material_node_tree=True,
+                reset_node_groups=False,
+            )
+            return
+
+        base_color_factor = (
+            principled_bsdf.base_color[0],
+            principled_bsdf.base_color[1],
+            principled_bsdf.base_color[2],
+            principled_bsdf.alpha,
+        )
+        base_color_texture_node = principled_bsdf.base_color_texture
+        if base_color_texture_node:
+            base_color_texture_image = base_color_texture_node.image
+        else:
+            base_color_texture_image = None
+
+        emissive_factor = principled_bsdf.emission_color
+        emission_color_texture_node = principled_bsdf.emission_color_texture
+        if emission_color_texture_node:
+            emissive_texture_image = emission_color_texture_node.image
+        else:
+            emissive_texture_image = None
+        emissive_strength = principled_bsdf.emission_strength
+
+        normalmap_texture_node = principled_bsdf.normalmap_texture
+        if normalmap_texture_node:
+            normal_texture_image = normalmap_texture_node.image
+            normal_texture_scale = principled_bsdf.normalmap_strength
+        else:
+            normal_texture_image = None
+            normal_texture_scale = None
+
         reset_shader_node_group(
             context,
             material,
-            reset_node_tree=True,
-            overwrite=(addon_version < (2, 20, 8)),
+            reset_material_node_tree=True,
+            reset_node_groups=False,
         )
+
+        gltf = get_material_extension(material).mtoon1
+        gltf.pbr_metallic_roughness.base_color_factor = base_color_factor
+        if base_color_texture_image:
+            gltf.pbr_metallic_roughness.base_color_texture.index.source = (
+                base_color_texture_image
+            )
+
+        gltf.emissive_factor = emissive_factor
+        gltf.extensions.khr_materials_emissive_strength.emissive_strength = (
+            emissive_strength
+        )
+        if emissive_texture_image:
+            gltf.emissive_texture.index.source = emissive_texture_image
+
+        if normal_texture_image:
+            gltf.normal_texture.index.source = normal_texture_image
+        if normal_texture_scale is not None:
+            gltf.normal_texture.scale = normal_texture_scale
 
     def convert_mtoon_unversioned_to_mtoon1(
         self,
@@ -492,9 +552,9 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
         if isinstance(uv_animation_scroll_y_speed_factor, float):
             uv_animation_scroll_y_speed_factor *= -1
 
-        shader.load_mtoon1_shader(context, material, overwrite=True)
+        shader.load_mtoon1_shader(context, material, reset_node_groups=True)
 
-        gltf = material.vrm_addon_extension.mtoon1
+        gltf = get_material_extension(material).mtoon1
         mtoon = gltf.extensions.vrmc_materials_mtoon
 
         gltf.alpha_mode = alpha_mode
@@ -502,6 +562,7 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
         mtoon.transparent_with_z_write = transparent_with_z_write
         gltf.pbr_metallic_roughness.base_color_factor = base_color_factor
         self.assign_mtoon_unversioned_image(
+            context,
             gltf.pbr_metallic_roughness.base_color_texture,
             base_color_texture,
             uv_offset,
@@ -509,12 +570,14 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
         )
         mtoon.shade_color_factor = shade_color_factor
         self.assign_mtoon_unversioned_image(
+            context,
             mtoon.shade_multiply_texture,
             shade_multiply_texture,
             uv_offset,
             uv_scale,
         )
         self.assign_mtoon_unversioned_image(
+            context,
             gltf.normal_texture,
             normal_texture,
             uv_offset,
@@ -531,12 +594,14 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
 
         gltf.emissive_factor = emissive_factor
         self.assign_mtoon_unversioned_image(
+            context,
             gltf.emissive_texture,
             emissive_texture,
             uv_offset,
             uv_scale,
         )
         self.assign_mtoon_unversioned_image(
+            context,
             mtoon.matcap_texture,
             matcap_texture,
             (0, 0),
@@ -553,6 +618,7 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
             mtoon.parametric_rim_lift_factor = parametric_rim_lift_factor
 
         self.assign_mtoon_unversioned_image(
+            context,
             mtoon.rim_multiply_texture,
             rim_multiply_texture,
             uv_offset,
@@ -580,6 +646,7 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
             mtoon.outline_width_mode = mtoon.OUTLINE_WIDTH_MODE_NONE
 
         self.assign_mtoon_unversioned_image(
+            context,
             mtoon.outline_width_multiply_texture,
             outline_width_multiply_texture,
             uv_offset,
@@ -592,6 +659,7 @@ class VRM_OT_convert_material_to_mtoon1(Operator):
             mtoon.outline_lighting_mix_factor = outline_lighting_mix_factor
 
         self.assign_mtoon_unversioned_image(
+            context,
             mtoon.uv_animation_mask_texture,
             uv_animation_mask_texture,
             uv_offset,
@@ -627,8 +695,8 @@ class VRM_OT_convert_mtoon1_to_bsdf_principled(Operator):
         options={"HIDDEN"}
     )
 
-    def execute(self, _context: Context) -> set[str]:
-        material = bpy.data.materials.get(self.material_name)
+    def execute(self, context: Context) -> set[str]:
+        material = context.blend_data.materials.get(self.material_name)
         if not isinstance(material, Material):
             return {"CANCELLED"}
         self.convert_mtoon1_to_bsdf_principled(material)
@@ -639,13 +707,41 @@ class VRM_OT_convert_mtoon1_to_bsdf_principled(Operator):
             material.use_nodes = True
         shader.clear_node_tree(material.node_tree, clear_inputs_outputs=True)
         if not material.node_tree:
-            logger.error(f"{material.name}'s node tree is None")
+            logger.error("%s's node tree is None", material.name)
             return
-        shader_node = material.node_tree.nodes.new("ShaderNodeBsdfPrincipled")
-        output_node = material.node_tree.nodes.new("ShaderNodeOutputMaterial")
-        material.node_tree.links.new(
-            output_node.inputs["Surface"], shader_node.outputs["BSDF"]
+
+        principled_bsdf = PrincipledBSDFWrapper(material, is_readonly=False)
+        gltf = get_material_extension(material).mtoon1
+
+        principled_bsdf.base_color = gltf.pbr_metallic_roughness.base_color_factor[:3]
+        base_color_texture_image = (
+            gltf.pbr_metallic_roughness.base_color_texture.index.source
         )
+        if base_color_texture_image:
+            base_color_texture_node = principled_bsdf.base_color_texture
+            if base_color_texture_node:
+                base_color_texture_node.image = base_color_texture_image
+
+        principled_bsdf.alpha = gltf.pbr_metallic_roughness.base_color_factor[3]
+
+        principled_bsdf.emission_color = list(gltf.emissive_factor)
+        principled_bsdf.emission_strength = (
+            gltf.extensions.khr_materials_emissive_strength.emissive_strength
+        )
+        emissive_texture_image = gltf.emissive_texture.index.source
+        if emissive_texture_image:
+            emission_color_texture_node = principled_bsdf.emission_color_texture
+            if emission_color_texture_node:
+                emission_color_texture_node.image = emissive_texture_image
+
+        normal_texture_image = gltf.normal_texture.index.source
+        if normal_texture_image:
+            normalmap_texture_node = principled_bsdf.normalmap_texture
+            if normalmap_texture_node:
+                normalmap_texture_node.image = normal_texture_image
+        normal_scale = gltf.normal_texture.scale
+        if abs(normal_scale - 1) >= float_info.epsilon:
+            principled_bsdf.normalmap_strength = gltf.normal_texture.scale
 
     if TYPE_CHECKING:
         # This code is auto generated.
@@ -664,10 +760,12 @@ class VRM_OT_reset_mtoon1_material_shader_node_tree(Operator):
     )
 
     def execute(self, context: Context) -> set[str]:
-        material = bpy.data.materials.get(self.material_name)
+        material = context.blend_data.materials.get(self.material_name)
         if not isinstance(material, Material):
             return {"CANCELLED"}
-        reset_shader_node_group(context, material, reset_node_tree=True, overwrite=True)
+        reset_shader_node_group(
+            context, material, reset_material_node_tree=True, reset_node_groups=True
+        )
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -740,20 +838,20 @@ class VRM_OT_import_mtoon1_texture_image_file(Operator, ImportHelper):
         name="Target Texture",
     )
 
-    def execute(self, _context: Context) -> set[str]:
+    def execute(self, context: Context) -> set[str]:
         filepath = self.filepath
         if not filepath or not Path(filepath).exists():
             return {"CANCELLED"}
 
-        last_images_len = len(bpy.data.images)
-        image = bpy.data.images.load(filepath, check_existing=True)
-        created = last_images_len < len(bpy.data.images)
+        last_images_len = len(context.blend_data.images)
+        image = context.blend_data.images.load(filepath, check_existing=True)
+        created = last_images_len < len(context.blend_data.images)
 
-        material = bpy.data.materials.get(self.material_name)
+        material = context.blend_data.materials.get(self.material_name)
         if not isinstance(material, Material):
             return {"FINISHED"}
 
-        gltf = material.vrm_addon_extension.mtoon1
+        gltf = get_material_extension(material).mtoon1
         mtoon = gltf.extensions.vrmc_materials_mtoon
 
         for texture in [
@@ -862,15 +960,16 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
         context: Context,
         material: Material,
         obj: Object,
+        *,
         create_modifier: bool,
     ) -> None:
-        shader.load_mtoon1_outline_geometry_node_group(context, overwrite=False)
+        shader.load_mtoon1_outline_geometry_node_group(context, reset_node_groups=False)
         node_group = context.blend_data.node_groups.get(
             shader.OUTLINE_GEOMETRY_GROUP_NAME
         )
         if not node_group:
             return
-        mtoon = material.vrm_addon_extension.mtoon1.extensions.vrmc_materials_mtoon
+        mtoon = get_material_extension(material).mtoon1.extensions.vrmc_materials_mtoon
         outline_width_mode_value = next(
             (
                 value
@@ -922,16 +1021,15 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
             return
 
         if not modifier and not create_modifier:
-            if not no_outline:
-                mtoon.outline_width_mode = (
-                    Mtoon1VrmcMaterialsMtoonPropertyGroup.OUTLINE_WIDTH_MODE_NONE
-                )
+            mtoon.outline_width_mode = (
+                Mtoon1VrmcMaterialsMtoonPropertyGroup.OUTLINE_WIDTH_MODE_NONE
+            )
             return
 
         outline_material_name = f"MToon Outline ({material.name})"
         modifier_name = f"MToon Outline ({material.name})"
 
-        outline_material = material.vrm_addon_extension.mtoon1.outline_material
+        outline_material = get_material_extension(material).mtoon1.outline_material
         reset_outline_material = not outline_material
         if reset_outline_material:
             outline_material = context.blend_data.materials.new(
@@ -943,29 +1041,31 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
                 outline_material.diffuse_color[3] = 0.25
             if outline_material.roughness != 0:
                 outline_material.roughness = 0
-            shader.load_mtoon1_shader(context, outline_material, overwrite=False)
-            outline_material.vrm_addon_extension.mtoon1.is_outline_material = True
-            material.vrm_addon_extension.mtoon1.outline_material = outline_material
+            shader.load_mtoon1_shader(
+                context, outline_material, reset_node_groups=False
+            )
+            get_material_extension(outline_material).mtoon1.is_outline_material = True
+            get_material_extension(material).mtoon1.outline_material = outline_material
         if outline_material.name != outline_material_name:
             outline_material.name = outline_material_name
         if not outline_material.use_nodes:
             outline_material.use_nodes = True
-        if not outline_material.vrm_addon_extension.mtoon1.is_outline_material:
-            outline_material.vrm_addon_extension.mtoon1.is_outline_material = True
+        if not get_material_extension(outline_material).mtoon1.is_outline_material:
+            get_material_extension(outline_material).mtoon1.is_outline_material = True
         if (
-            outline_material.vrm_addon_extension.mtoon1.alpha_cutoff
-            != material.vrm_addon_extension.mtoon1.alpha_cutoff
+            get_material_extension(outline_material).mtoon1.alpha_cutoff
+            != get_material_extension(material).mtoon1.alpha_cutoff
         ):
-            outline_material.vrm_addon_extension.mtoon1.alpha_cutoff = (
-                material.vrm_addon_extension.mtoon1.alpha_cutoff
-            )
+            get_material_extension(
+                outline_material
+            ).mtoon1.alpha_cutoff = get_material_extension(material).mtoon1.alpha_cutoff
         if (
-            outline_material.vrm_addon_extension.mtoon1.alpha_mode
-            != material.vrm_addon_extension.mtoon1.alpha_mode
+            get_material_extension(outline_material).mtoon1.alpha_mode
+            != get_material_extension(material).mtoon1.alpha_mode
         ):
-            outline_material.vrm_addon_extension.mtoon1.alpha_mode = (
-                material.vrm_addon_extension.mtoon1.alpha_mode
-            )
+            get_material_extension(
+                outline_material
+            ).mtoon1.alpha_mode = get_material_extension(material).mtoon1.alpha_mode
         if outline_material.shadow_method != "NONE":
             outline_material.shadow_method = "NONE"
         if not outline_material.use_backface_culling:
@@ -1077,7 +1177,10 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
 
         if reset_outline_material:
             reset_shader_node_group(
-                context, material, reset_node_tree=False, overwrite=False
+                context,
+                material,
+                reset_material_node_tree=False,
+                reset_node_groups=False,
             )
 
     @staticmethod
@@ -1090,9 +1193,9 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
             material = context.blend_data.materials.get(material_slot.material.name)
             if not material:
                 continue
-            if not material.vrm_addon_extension.mtoon1.enabled:
+            if not get_material_extension(material).mtoon1.enabled:
                 continue
-            if material.vrm_addon_extension.mtoon1.is_outline_material:
+            if get_material_extension(material).mtoon1.is_outline_material:
                 continue
 
             VRM_OT_refresh_mtoon1_outline.assign(
@@ -1102,15 +1205,16 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
     @staticmethod
     def refresh(
         context: Context,
-        create_modifier: bool,
         material_name: Optional[str] = None,
+        *,
+        create_modifier: bool,
     ) -> None:
         if bpy.app.version < (3, 3):
             return
         for obj in context.blend_data.objects:
             if obj.type != "MESH":
                 continue
-            outline_material_names = []
+            outline_material_names: list[str] = []
             for material_slot in obj.material_slots:
                 if not material_slot.material:
                     continue
@@ -1122,20 +1226,19 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
                 material = context.blend_data.materials.get(material_slot.material.name)
                 if not material:
                     continue
-                if not material.vrm_addon_extension.mtoon1.enabled:
+                if not get_material_extension(material).mtoon1.enabled:
                     continue
-                if material.vrm_addon_extension.mtoon1.is_outline_material:
+                if get_material_extension(material).mtoon1.is_outline_material:
                     continue
 
                 VRM_OT_refresh_mtoon1_outline.assign(
-                    context, material, obj, create_modifier
+                    context, material, obj, create_modifier=create_modifier
                 )
                 outline_material_names.append(material.name)
             if material_name is not None:
                 continue
 
-            # マテリアル名が指定されなかった場合は、
-            # 不要なアウトラインのモディファイアを削除する
+            # Remove unnecessary outline modifiers if no material name is specified.
             for search_modifier_name in list(obj.modifiers.keys()):
                 search_modifier = obj.modifiers.get(search_modifier_name)
                 if not search_modifier:
@@ -1161,7 +1264,7 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
                 obj.modifiers.remove(search_modifier)
 
     def execute(self, context: Context) -> set[str]:
-        self.refresh(context, self.create_modifier, self.material_name)
+        self.refresh(context, self.material_name, create_modifier=self.create_modifier)
         return {"FINISHED"}
 
     if TYPE_CHECKING:
@@ -1169,3 +1272,60 @@ class VRM_OT_refresh_mtoon1_outline(Operator):
         # `poetry run python tools/property_typing.py`
         material_name: str  # type: ignore[no-redef]
         create_modifier: bool  # type: ignore[no-redef]
+
+
+class VRM_OT_show_material_blender_4_2_warning(Operator):
+    bl_idname = "vrm.show_material_blender_4_2_warning"
+    bl_label = "Blender 4.2 Material Upgrade Warning"
+    bl_description = "Show Material Blender 4.2 Warning"
+    bl_options: AbstractSet[str] = {"REGISTER"}
+
+    material_name_lines: StringProperty(  # type: ignore[valid-type]
+        options={"HIDDEN"}
+    )
+
+    def execute(self, _context: Context) -> set[str]:
+        return {"FINISHED"}
+
+    def invoke(self, context: Context, _event: Event) -> set[str]:
+        return context.window_manager.invoke_props_dialog(self, width=750)
+
+    def draw(self, _context: Context) -> None:
+        column = self.layout.row(align=True).column()
+        text = pgettext(
+            'Updating to Blender 4.2 may unintentionally change the "{alpha_mode}"'
+            + ' of some MToon materials to "{transparent}".\n'
+            + 'This was previously implemented using the material\'s "{blend_mode}"'
+            + " but since that setting was removed in Blender 4.2.\n"
+            + 'In the current VRM add-on, the "{alpha_mode}" function has been'
+            + " re-implemented using a different method. However, it\n"
+            + "was not possible"
+            + " to implement automatic migration of old settings values because those"
+            + " values could no longer be read.\n"
+            + 'Please check the "{alpha_mode}" settings for materials that have'
+            + " MToon enabled. "
+            + "Alternatively, if you open and save the \ncurrent file using the latest"
+            + " version of Blender 3.6 and the VRM add-on, the data for automatic"
+            + " migration will be created \ninternally, so that file can be opened in"
+            + " Blender 4.2 or later without losing the material settings.\n"
+            + "Materials that may be affected are as follows:"
+        ).format(
+            blend_mode=pgettext("Blend Mode"),
+            alpha_mode=pgettext("Alpha Mode"),
+            transparent=pgettext("Transparent"),
+        )
+        description_outer_column = column.column()
+        description_outer_column.emboss = "NONE"
+        description_column = description_outer_column.box().column(align=True)
+        for i, line in enumerate(text.splitlines()):
+            icon = "ERROR" if i == 0 else "NONE"
+            description_column.label(text=line, translate=False, icon=icon)
+        material_column = column.box().column(align=True)
+        for line in self.material_name_lines.splitlines():
+            material_column.label(text=line, translate=False, icon="MATERIAL")
+        column.separator()
+
+    if TYPE_CHECKING:
+        # This code is auto generated.
+        # `poetry run python tools/property_typing.py`
+        material_name_lines: str  # type: ignore[no-redef]

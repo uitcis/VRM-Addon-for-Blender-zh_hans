@@ -13,7 +13,9 @@ from mathutils import Matrix, Vector
 
 from ..common.version import addon_version
 from ..common.vrm0.human_bone import HumanBoneSpecifications
+from ..common.workspace import save_workspace
 from . import migration
+from .extension import get_armature_extension
 from .vrm0.property_group import (
     Vrm0BlendShapeGroupPropertyGroup,
     Vrm0HumanoidPropertyGroup,
@@ -34,8 +36,7 @@ class ICYP_OT_make_armature(Operator):
         options={"HIDDEN"},
     )
 
-    #
-    WIP_with_template_mesh: BoolProperty(  # type: ignore[valid-type]
+    wip_with_template_mesh: BoolProperty(  # type: ignore[valid-type]
         default=False
     )
 
@@ -143,17 +144,14 @@ class ICYP_OT_make_armature(Operator):
     armature_obj: Optional[Object] = None
 
     def execute(self, context: Context) -> set[str]:
-        if (
-            context.view_layer.objects.active is not None
-            and context.view_layer.objects.active.mode != "OBJECT"
-        ):
-            bpy.ops.object.mode_set(mode="OBJECT")
-        self.armature_obj, compare_dict = self.make_armature(context)
-        self.setup_as_vrm(self.armature_obj, compare_dict)
-        if self.custom_property_name:
-            self.armature_obj[self.custom_property_name] = True
-        if self.WIP_with_template_mesh:
-            IcypTemplateMeshMaker(context, self)
+        with save_workspace(context):
+            self.armature_obj, compare_dict = self.make_armature(context)
+            self.setup_as_vrm(context, self.armature_obj, compare_dict)
+            if self.custom_property_name:
+                self.armature_obj[self.custom_property_name] = True
+            if self.wip_with_template_mesh:
+                IcypTemplateMeshMaker(context, self)
+        context.view_layer.objects.active = self.armature_obj
         return {"FINISHED"}
 
     def float_prop(self, name: str) -> float:
@@ -179,9 +177,9 @@ class ICYP_OT_make_armature(Operator):
         if not isinstance(armature_data, Armature):
             message = "armature data is not an Armature"
             raise TypeError(message)
-        armature_data.vrm_addon_extension.addon_version = addon_version()
+        get_armature_extension(armature_data).addon_version = addon_version()
 
-        bone_dict = {}
+        bone_dict: dict[str, EditBone] = {}
 
         def bone_add(
             name: str,
@@ -558,7 +556,7 @@ class ICYP_OT_make_armature(Operator):
         }
 
         # VRM bone name : blender bone name
-        bone_name_all_dict = {}
+        bone_name_all_dict: dict[str, str] = {}
         bone_name_all_dict.update(body_dict)
         bone_name_all_dict.update(left_right_body_dict)
         bone_name_all_dict.update(fingers_dict)
@@ -572,14 +570,16 @@ class ICYP_OT_make_armature(Operator):
         context.scene.view_layers.update()
         return armature, bone_name_all_dict
 
-    def setup_as_vrm(self, armature: Object, compare_dict: dict[str, str]) -> None:
+    def setup_as_vrm(
+        self, context: Context, armature: Object, compare_dict: dict[str, str]
+    ) -> None:
         Vrm0HumanoidPropertyGroup.fixup_human_bones(armature)
         armature_data = armature.data
         if isinstance(armature_data, Armature) and not self.skip_heavy_armature_setup:
             for vrm_bone_name, bpy_bone_name in compare_dict.items():
-                for (
-                    human_bone
-                ) in armature_data.vrm_addon_extension.vrm0.humanoid.human_bones:
+                for human_bone in get_armature_extension(
+                    armature_data
+                ).vrm0.humanoid.human_bones:
                     if human_bone.bone == vrm_bone_name:
                         human_bone.node.set_bone_name(bpy_bone_name)
                         break
@@ -588,7 +588,7 @@ class ICYP_OT_make_armature(Operator):
             offset_from_head_bone=(-self.eye_depth, self.head_size() / 6, 0),
         )
         if not self.skip_heavy_armature_setup:
-            migration.migrate(armature.name, defer=False)
+            migration.migrate(context, armature.name)
 
     @classmethod
     def make_extension_setting_and_metas(
@@ -599,8 +599,8 @@ class ICYP_OT_make_armature(Operator):
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return
-        vrm0 = armature_data.vrm_addon_extension.vrm0
-        vrm1 = armature_data.vrm_addon_extension.vrm1
+        vrm0 = get_armature_extension(armature_data).vrm0
+        vrm1 = get_armature_extension(armature_data).vrm1
         vrm0.first_person.first_person_bone.set_bone_name("head")
         vrm0.first_person.first_person_bone_offset = (0, 0, 0.06)
         vrm1.look_at.offset_from_head_bone = offset_from_head_bone
@@ -624,7 +624,7 @@ class ICYP_OT_make_armature(Operator):
         # This code is auto generated.
         # `poetry run python tools/property_typing.py`
         skip_heavy_armature_setup: bool  # type: ignore[no-redef]
-        WIP_with_template_mesh: bool  # type: ignore[no-redef]
+        wip_with_template_mesh: bool  # type: ignore[no-redef]
         tall: float  # type: ignore[no-redef]
         head_ratio: float  # type: ignore[no-redef]
         head_width_ratio: float  # type: ignore[no-redef]
@@ -678,9 +678,9 @@ class IcypTemplateMeshMaker:
     def make_mesh_obj(
         self, context: Context, name: str, method: Callable[[Mesh], None]
     ) -> Object:
-        mesh = bpy.data.meshes.new(name)
+        mesh = context.blend_data.meshes.new(name)
         method(mesh)
-        obj = bpy.data.objects.new(name, mesh)
+        obj = context.blend_data.objects.new(name, mesh)
         scene = context.scene
         scene.collection.objects.link(obj)
         context.view_layer.objects.active = obj
@@ -706,13 +706,15 @@ class IcypTemplateMeshMaker:
         tmp_dict = {
             v.bone: i
             for i, v in enumerate(
-                armature_data.vrm_addon_extension.vrm0.humanoid.human_bones
+                get_armature_extension(armature_data).vrm0.humanoid.human_bones
             )
         }
 
-        bone_name: str = armature_data.vrm_addon_extension.vrm0.humanoid.human_bones[
-            tmp_dict[bone]
-        ].node.bone_name
+        bone_name: str = (
+            get_armature_extension(armature_data)
+            .vrm0.humanoid.human_bones[tmp_dict[bone]]
+            .node.bone_name
+        )
         humanoid_bone = armature_data.bones[bone_name]
         return humanoid_bone
 

@@ -73,12 +73,20 @@ def sorted_required_first(
     mapping: dict[str, HumanBoneSpecification],
 ) -> dict[str, HumanBoneSpecification]:
     sorted_mapping: dict[str, HumanBoneSpecification] = {}
-    for bpy_name, specification in mapping.items():
-        if specification.requirement:
-            sorted_mapping[bpy_name] = specification
-    for bpy_name, specification in mapping.items():
-        if not specification.requirement:
-            sorted_mapping[bpy_name] = specification
+    sorted_mapping.update(
+        {
+            bpy_name: specification
+            for bpy_name, specification in mapping.items()
+            if specification.requirement
+        }
+    )
+    sorted_mapping.update(
+        {
+            bpy_name: specification
+            for bpy_name, specification in mapping.items()
+            if not specification.requirement
+        }
+    )
     return sorted_mapping
 
 
@@ -101,6 +109,6 @@ def create_human_bone_mapping(
         ]
     )[-1]
     if required_count:
-        logger.debug(f'Treat as "{name}" bone mappings')
+        logger.debug('Treat as "%s" bone mappings', name)
         return sorted_required_first(mapping)
     return {}

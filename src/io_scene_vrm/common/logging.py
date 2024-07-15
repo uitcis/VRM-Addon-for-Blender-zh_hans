@@ -5,6 +5,8 @@ from os import environ
 from types import TracebackType
 from typing import TYPE_CHECKING, Optional, Union
 
+import bpy
+
 # https://github.com/python/typeshed/issues/7855
 if TYPE_CHECKING or sys.version_info >= (3, 11):
     LoggerAdapter = standard_logging.LoggerAdapter[standard_logging.Logger]
@@ -49,6 +51,8 @@ class VrmAddonLoggerAdapter(LoggerAdapter):
 # https://docs.python.org/3.7/library/logging.html#logging.getLogger
 def get_logger(name: str) -> LoggerAdapter:
     logger = standard_logging.getLogger(name)
-    if environ.get("BLENDER_VRM_LOGGING_LEVEL_DEBUG") == "yes":
-        logger.setLevel(standard_logging.DEBUG)
+    if bpy.app.debug or environ.get("BLENDER_VRM_LOGGING_LEVEL_DEBUG") == "yes":
+        logger.setLevel(min(standard_logging.DEBUG, logger.getEffectiveLevel()))
+    else:
+        logger.setLevel(max(standard_logging.INFO, logger.getEffectiveLevel()))
     return VrmAddonLoggerAdapter(logger, {})

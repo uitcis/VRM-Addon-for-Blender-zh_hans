@@ -3,20 +3,12 @@ import struct
 from typing import Final, Optional, Union
 
 from .binary_reader import BinaryReader
-from .deep import Json
+from .convert import Json
+from .deep import make_json
 
 # https://www.khronos.org/opengl/wiki/Small_Float_Formats#Numeric_limits_and_precision
 FLOAT_POSITIVE_MAX: Final = 3.4028237e38
 FLOAT_NEGATIVE_MAX: Final = -FLOAT_POSITIVE_MAX
-
-TEXTURE_INPUT_NAMES: Final = (
-    "color_texture",
-    "normal",
-    "emissive_texture",
-    "occlusion_texture",
-)
-VAL_INPUT_NAMES: Final = ("metallic", "roughness", "unlit")
-RGBA_INPUT_NAMES: Final = ("base_Color", "emissive_color")
 
 
 def parse_glb(data: bytes) -> tuple[dict[str, Json], bytes]:
@@ -54,7 +46,7 @@ def parse_glb(data: bytes) -> tuple[dict[str, Json], bytes]:
             body = chunk_data
             continue
         if chunk_type == "JSON":
-            json_str = chunk_data.decode("utf-8")  # blenderのpythonが古く自前decode要す
+            json_str = chunk_data.decode()
             continue
 
         message = f"unknown chunk_type: {chunk_type}"
@@ -64,10 +56,12 @@ def parse_glb(data: bytes) -> tuple[dict[str, Json], bytes]:
         message = "failed to read json chunk"
         raise ValueError(message)
 
-    json_obj = json.loads(json_str)
+    json_obj = make_json(json.loads(json_str))
     if not isinstance(json_obj, dict):
         raise TypeError("VRM has invalid json: " + str(json_obj))
-    return json_obj, body if body else b""
+    if body is None:
+        body = b""
+    return json_obj, body
 
 
 def pack_glb(
@@ -76,7 +70,8 @@ def pack_glb(
     magic = b"glTF" + struct.pack("<I", 2)
     json_str = json.dumps(
         json_dict,
-        # UniVRM 0.56.3はエディタインポート時のUnicodeエスケープに未対応
+        # UniVRM 0.56.3 cannot import a json containing unicode escape chars into
+        # Unity Editor.
         ensure_ascii=False,
     ).encode("utf-8")
     if len(json_str) % 4 != 0:

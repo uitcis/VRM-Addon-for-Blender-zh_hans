@@ -1,10 +1,12 @@
 import bpy
-from bpy.types import Armature
+from bpy.types import Armature, Context
+
+from io_scene_vrm.common import ops
 
 
-def test() -> None:
-    bpy.ops.icyp.make_basic_armature()
-    armatures = [obj for obj in bpy.data.objects if obj.type == "ARMATURE"]
+def test(context: Context) -> None:
+    ops.icyp.make_basic_armature()
+    armatures = [obj for obj in context.blend_data.objects if obj.type == "ARMATURE"]
     assert len(armatures) == 1
     armature = armatures[0]
     if not isinstance(armature.data, Armature):
@@ -17,7 +19,7 @@ def test() -> None:
     upper_arm_r = armature.data.bones["upper_arm.R"]
     upper_arm_r.name = "J_Sec_R_UpperArm"
 
-    bpy.ops.vrm.bones_rename(armature_name=armature.name)
+    ops.vrm.bones_rename(armature_name=armature.name)
 
     assert head == armature.data.bones["Head"]
     assert eye_l == armature.data.bones["FaceEye_L"]
@@ -25,4 +27,4 @@ def test() -> None:
 
 
 if __name__ == "__main__":
-    test()
+    test(bpy.context)

@@ -1,11 +1,11 @@
 {
   "build": {
-    "dockerfile": "Dockerfile",
-    "context": "../tools"
+    "dockerfile": "Dockerfile"
   },
-  "containerUser": "developer",
+  "remoteUser": "developer",
   "onCreateCommand": "./tools/devcontainer_on_create_command.sh",
   "updateContentCommand": "./tools/devcontainer_update_content_command.sh",
+  "postAttachCommand": "./tools/devcontainer_post_attach_command.sh",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {}
   },

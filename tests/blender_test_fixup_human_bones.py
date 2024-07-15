@@ -1,19 +1,21 @@
 import bpy
-from bpy.types import Armature
+from bpy.types import Armature, Context
 
+from io_scene_vrm.common import ops
 from io_scene_vrm.common.vrm0.human_bone import HumanBoneName
+from io_scene_vrm.editor.extension import get_armature_extension
 from io_scene_vrm.editor.vrm0.property_group import Vrm0HumanoidPropertyGroup
 
 
-def test() -> None:
-    bpy.ops.icyp.make_basic_armature()
-    armatures = [obj for obj in bpy.data.objects if obj.type == "ARMATURE"]
+def test(context: Context) -> None:
+    ops.icyp.make_basic_armature()
+    armatures = [obj for obj in context.blend_data.objects if obj.type == "ARMATURE"]
     assert len(armatures) == 1
     armature = armatures[0]
     if not isinstance(armature.data, Armature):
         raise TypeError
 
-    human_bones = armature.data.vrm_addon_extension.vrm0.humanoid.human_bones
+    human_bones = get_armature_extension(armature.data).vrm0.humanoid.human_bones
 
     original = [(str(b.node.bone_name), str(b.bone)) for b in human_bones]
 
@@ -56,4 +58,4 @@ def test() -> None:
 
 
 if __name__ == "__main__":
-    test()
+    test(bpy.context)

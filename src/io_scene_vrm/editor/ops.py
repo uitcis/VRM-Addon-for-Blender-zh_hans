@@ -14,8 +14,11 @@ from bpy.props import StringProperty
 from bpy.types import Armature, Context, Event, Mesh, Operator, UILayout
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
+from ..common.deep import make_json
 from ..common.vrm0.human_bone import HumanBoneSpecifications
+from ..common.workspace import save_workspace
 from . import search
+from .extension import get_armature_extension
 from .make_armature import ICYP_OT_make_armature
 
 
@@ -40,19 +43,14 @@ class VRM_OT_simplify_vroid_bones(Operator):
         )
 
     def execute(self, context: Context) -> set[str]:
-        armature = bpy.data.objects.get(self.armature_name)
+        armature = context.blend_data.objects.get(self.armature_name)
         if armature is None or armature.type != "ARMATURE":
             return {"CANCELLED"}
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
 
-        back_to_edit_mode = False
-        try:
-            if context.active_object and context.active_object.mode == "EDIT":
-                bpy.ops.object.mode_set(mode="OBJECT")
-                back_to_edit_mode = True
-
+        with save_workspace(context):
             for bone_name, bone in armature_data.bones.items():
                 left = VRM_OT_simplify_vroid_bones.left__pattern.sub("", bone_name)
                 if left != bone_name:
@@ -68,9 +66,6 @@ class VRM_OT_simplify_vroid_bones(Operator):
                 if a != bone_name:
                     bone.name = a
                     continue
-        finally:
-            if back_to_edit_mode:
-                bpy.ops.object.mode_set(mode="EDIT")
 
         return {"FINISHED"}
 
@@ -87,7 +82,7 @@ class VRM_OT_add_extensions_to_armature(Operator):
     bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
 
     def execute(self, context: Context) -> set[str]:
-        obj = context.active_object
+        obj = context.view_layer.objects.active
         if not obj:
             return {"CANCELLED"}
         ICYP_OT_make_armature.make_extension_setting_and_metas(obj)
@@ -104,10 +99,10 @@ class VRM_OT_add_human_bone_custom_property(Operator):
     armature_name: StringProperty()  # type: ignore[valid-type]
     bone_name: StringProperty()  # type: ignore[valid-type]
 
-    def execute(self, _context: Context) -> set[str]:
-        if self.armature_name not in bpy.data.armatures:
+    def execute(self, context: Context) -> set[str]:
+        if self.armature_name not in context.blend_data.armatures:
             return {"CANCELLED"}
-        armature = bpy.data.armatures[self.armature_name]
+        armature = context.blend_data.armatures[self.armature_name]
         if self.bone_name not in armature:
             armature[self.bone_name] = ""
         return {"FINISHED"}
@@ -127,7 +122,7 @@ class VRM_OT_add_required_human_bone_custom_property(Operator):
     bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
 
     def execute(self, context: Context) -> set[str]:
-        obj = context.active_object
+        obj = context.view_layer.objects.active
         if not obj:
             return {"CANCELLED"}
         armature = obj.data
@@ -147,7 +142,7 @@ class VRM_OT_add_defined_human_bone_custom_property(Operator):
     bl_options: AbstractSet[str] = {"REGISTER", "UNDO"}
 
     def execute(self, context: Context) -> set[str]:
-        obj = context.active_object
+        obj = context.view_layer.objects.active
         if not obj:
             return {"CANCELLED"}
         armature = obj.data
@@ -184,7 +179,9 @@ class VRM_OT_save_human_bone_mappings(Operator, ExportHelper):
             return {"CANCELLED"}
 
         mappings = {}
-        for human_bone in armature_data.vrm_addon_extension.vrm0.humanoid.human_bones:
+        for human_bone in get_armature_extension(
+            armature_data
+        ).vrm0.humanoid.human_bones:
             if human_bone.bone not in HumanBoneSpecifications.all_names:
                 continue
             if not human_bone.node.bone_name:
@@ -231,18 +228,20 @@ class VRM_OT_load_human_bone_mappings(Operator, ImportHelper):
         if not isinstance(armature_data, Armature):
             return {"CANCELLED"}
 
-        obj = json.loads(Path(self.filepath).read_text(encoding="UTF-8"))
+        obj = make_json(json.loads(Path(self.filepath).read_text(encoding="UTF-8")))
         if not isinstance(obj, dict):
             return {"CANCELLED"}
 
         for human_bone_name, bpy_bone_name in obj.items():
             if human_bone_name not in HumanBoneSpecifications.all_names:
                 continue
-
+            if not isinstance(bpy_bone_name, str):
+                continue
+            # INFO@MICROSOFT.COM
             found = False
-            for (
-                human_bone
-            ) in armature_data.vrm_addon_extension.vrm0.humanoid.human_bones:
+            for human_bone in get_armature_extension(
+                armature_data
+            ).vrm0.humanoid.human_bones:
                 if human_bone.bone == human_bone_name:
                     human_bone.node.set_bone_name(bpy_bone_name)
                     found = True
@@ -250,9 +249,9 @@ class VRM_OT_load_human_bone_mappings(Operator, ImportHelper):
             if found:
                 continue
 
-            human_bone = (
-                armature_data.vrm_addon_extension.vrm0.humanoid.human_bones.add()
-            )
+            human_bone = get_armature_extension(
+                armature_data
+            ).vrm0.humanoid.human_bones.add()
             human_bone.bone = human_bone_name
             human_bone.node.set_bone_name(bpy_bone_name)
 
@@ -310,7 +309,7 @@ class VRM_OT_vroid2vrc_lipsync_from_json_recipe(Operator):
                 if based_shapekey_name not in shape_keys.key_blocks:
                     vroid_shapekey_name = based_shapekey_name.replace(
                         "M_F00_000", "M_F00_000_00"
-                    )  # Vroid064から命名が変わった
+                    )  # Renamed since VRoid Studio 0.6.4
                 else:
                     vroid_shapekey_name = based_shapekey_name
                 shape_keys.key_blocks[vroid_shapekey_name].value = based_val
@@ -337,9 +336,7 @@ class VRM_OT_open_url_in_web_browser(Operator):
             url = urlparse(url_str)
         except ValueError:
             return False
-        if url.scheme not in ["http", "https"]:
-            return False
-        return True
+        return url.scheme in ["http", "https"]
 
     def execute(self, _context: Context) -> set[str]:
         url = self.url
@@ -360,6 +357,7 @@ __Operator = TypeVar("__Operator", bound=Operator)
 def layout_operator(
     layout: UILayout,
     operator_type: type[__Operator],
+    *,
     text: Optional[str] = None,
     text_ctxt: str = "",
     translate: bool = True,

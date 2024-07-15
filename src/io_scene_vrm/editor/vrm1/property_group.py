@@ -349,15 +349,15 @@ class Vrm1HumanBonesPropertyGroup(PropertyGroup):
             if not specification.parent_requirement:
                 continue
             if not specification.parent_name:
-                logger.error(f"No parent for '{name}' in spec")
+                logger.error("No parent for '%s' in spec", name)
                 continue
             parent = human_bone_name_to_human_bone.get(specification.parent_name)
             if not parent:
-                logger.error(f"No parent for '{name}' in dict")
+                logger.error("No parent for '%s' in dict", name)
                 continue
             parent_specification = specification.parent()
             if not parent_specification:
-                logger.error(f"No parent specification for '{name}'")
+                logger.error("No parent specification for '%s'", name)
                 continue
             if not parent.node.bone_name:
                 messages.append(
@@ -385,13 +385,13 @@ class Vrm1HumanBonesPropertyGroup(PropertyGroup):
         ):
             return
 
-        human_bones = armature_data.vrm_addon_extension.vrm1.humanoid.human_bones
+        human_bones = get_armature_vrm1_extension(armature_data).humanoid.human_bones
 
         # 複数のボーンマップに同一のBlenderのボーンが設定されていたら片方を削除
         fixup = True
         while fixup:
             fixup = False
-            found_node_bone_names = []
+            found_node_bone_names: list[str] = []
             for human_bone in human_bones.human_bone_name_to_human_bone().values():
                 if not human_bone.node.bone_name:
                     continue
@@ -403,16 +403,43 @@ class Vrm1HumanBonesPropertyGroup(PropertyGroup):
                 break
 
     @staticmethod
-    def update_all_node_candidates(
+    def defer_update_all_node_candidates(
         armature_data_name: str,
-        defer: bool = False,
+        *,
         force: bool = False,
     ) -> None:
-        armature_data = bpy.data.armatures.get(armature_data_name)
+        bpy.app.timers.register(
+            functools.partial(
+                Vrm1HumanBonesPropertyGroup.update_all_node_candidates_timer_callback,
+                armature_data_name,
+                force=force,
+            )
+        )
+
+    @staticmethod
+    def update_all_node_candidates_timer_callback(
+        armature_object_name: str, *, force: bool = False
+    ) -> None:
+        """update_all_node_candidates()の型をbpy.app.timers.registerに合わせるためのラッパー."""
+        context = bpy.context  # Contextはフレームを跨げないので新たに取得する
+        Vrm1HumanBonesPropertyGroup.update_all_node_candidates(
+            context, armature_object_name, force=force
+        )
+
+    @staticmethod
+    def update_all_node_candidates(
+        context: Optional[Context],
+        armature_data_name: str,
+        *,
+        force: bool = False,
+    ) -> None:
+        if context is None:
+            context = bpy.context
+        armature_data = context.blend_data.armatures.get(armature_data_name)
         if not isinstance(armature_data, Armature):
             return
-        human_bones = armature_data.vrm_addon_extension.vrm1.humanoid.human_bones
-        bone_names = []
+        human_bones = get_armature_vrm1_extension(armature_data).humanoid.human_bones
+        bone_names: list[str] = []
         for bone in sorted(armature_data.bones.values(), key=lambda b: str(b.name)):
             bone_names.append(bone.name)
             bone_names.append(bone.parent.name if bone.parent else "")
@@ -423,17 +450,6 @@ class Vrm1HumanBonesPropertyGroup(PropertyGroup):
             ]
             if up_to_date:
                 return
-
-        if defer:
-            bpy.app.timers.register(
-                functools.partial(
-                    Vrm1HumanBonesPropertyGroup.update_all_node_candidates,
-                    armature_data_name,
-                    False,
-                    force,
-                )
-            )
-            return
 
         human_bones.last_bone_names.clear()
         for bone_name in bone_names:
@@ -651,7 +667,7 @@ class Vrm1LookAtPropertyGroup(PropertyGroup):
             armature_data = armature_object.data
             if not isinstance(armature_data, Armature):
                 continue
-            look_at = armature_data.vrm_addon_extension.vrm1.look_at
+            look_at = get_armature_vrm1_extension(armature_data).look_at
             look_at.update_preview(context, armature_object, armature_data)
 
     def update_preview(
@@ -660,10 +676,7 @@ class Vrm1LookAtPropertyGroup(PropertyGroup):
         armature_object: Object,
         armature_data: Armature,
     ) -> None:
-        ext = armature_data.vrm_addon_extension
-        if not ext.is_vrm1():
-            return
-        vrm1 = ext.vrm1
+        vrm1 = get_armature_vrm1_extension(armature_data)
         preview_target_bpy_object = self.preview_target_bpy_object
         if not preview_target_bpy_object:
             return
@@ -1124,6 +1137,8 @@ class Vrm1ExpressionPropertyGroup(PropertyGroup):
         return 0.0
 
     def set_preview(self, value: object) -> None:
+        context = bpy.context
+
         if not isinstance(value, (int, float)):
             return
 
@@ -1136,9 +1151,8 @@ class Vrm1ExpressionPropertyGroup(PropertyGroup):
 
         self["preview"] = float(value)
 
-        blend_data = bpy.data
         for morph_target_bind in self.morph_target_binds:
-            mesh_object = blend_data.objects.get(
+            mesh_object = context.blend_data.objects.get(
                 morph_target_bind.node.mesh_object_name
             )
             if not mesh_object or mesh_object.type != "MESH":
@@ -1149,7 +1163,7 @@ class Vrm1ExpressionPropertyGroup(PropertyGroup):
             mesh_shape_keys = mesh.shape_keys
             if not mesh_shape_keys:
                 continue
-            shape_key = blend_data.shape_keys.get(mesh_shape_keys.name)
+            shape_key = context.blend_data.shape_keys.get(mesh_shape_keys.name)
             if not shape_key:
                 continue
             key_blocks = shape_key.key_blocks
@@ -1213,19 +1227,22 @@ class Vrm1CustomExpressionPropertyGroup(Vrm1ExpressionPropertyGroup):
         return str(self.get("custom_name", ""))
 
     def set_custom_name(self, value: str) -> None:
+        context = bpy.context
+
         if not value or self.get("custom_name") == value:
             return
 
         vrm1: Optional[Vrm1PropertyGroup] = None
-        for search_armature in bpy.data.armatures:
-            ext = search_armature.vrm_addon_extension
-            for custom_expression in ext.vrm1.expressions.custom:
+        for search_armature in context.blend_data.armatures:
+            for custom_expression in get_armature_vrm1_extension(
+                search_armature
+            ).expressions.custom:
                 if custom_expression != self:
                     continue
-                vrm1 = search_armature.vrm_addon_extension.vrm1
+                vrm1 = get_armature_vrm1_extension(search_armature)
                 break
         if vrm1 is None:
-            logger.error(f"No armature extension for {self}")
+            logger.error("No armature extension for %s", self)
             return
 
         expressions = vrm1.expressions
@@ -1238,7 +1255,7 @@ class Vrm1CustomExpressionPropertyGroup(Vrm1ExpressionPropertyGroup):
                 break
 
         self["custom_name"] = custom_name
-        self.name = custom_name  # pylint: disable=attribute-defined-outside-init
+        self.name = custom_name
 
     custom_name: StringProperty(  # type: ignore[valid-type]
         name="Name",
@@ -1534,3 +1551,10 @@ class Vrm1PropertyGroup(PropertyGroup):
         first_person: Vrm1FirstPersonPropertyGroup  # type: ignore[no-redef]
         look_at: Vrm1LookAtPropertyGroup  # type: ignore[no-redef]
         expressions: Vrm1ExpressionsPropertyGroup  # type: ignore[no-redef]
+
+
+def get_armature_vrm1_extension(armature: Armature) -> Vrm1PropertyGroup:
+    from ..extension import get_armature_extension
+
+    vrm1: Vrm1PropertyGroup = get_armature_extension(armature).vrm1
+    return vrm1

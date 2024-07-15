@@ -16,14 +16,17 @@ class TestVersion(TestCase):
     def test_version(self) -> None:
         self.assertEqual(
             version.addon_version(),
-            (2, 20, 38),
+            (2, 20, 64),
         )
 
 
 class TestBlenderManifest(TestCase):
     def test_read_default(self) -> None:
         blender_manifest = BlenderManifest.read()
-        self.assertEqual(blender_manifest.blender_version_max[0], 4)
+        self.assertGreater(blender_manifest.version, (2,))
+        self.assertGreater(blender_manifest.blender_version_min, (2, 93))
+        if blender_manifest.blender_version_max is not None:
+            self.assertGreater(blender_manifest.blender_version_max, (4,))
 
     def test_read(self) -> None:
         text = (
@@ -173,7 +176,7 @@ class TestVrm0HumanBone(TestCase):
             sorted(vrm0_human_bone.HumanBoneSpecifications.all_names),
         )
 
-        structure_human_bone_names = []
+        structure_human_bone_names: list[str] = []
         children: list[vrm0_human_bone.HumanBoneStructure] = [
             vrm0_human_bone.HUMAN_BONE_STRUCTURE
         ]
@@ -283,7 +286,7 @@ class TestVrm1HumanBone(TestCase):
             sorted(vrm1_human_bone.HumanBoneSpecifications.all_names),
         )
 
-        structure_human_bone_names = []
+        structure_human_bone_names: list[str] = []
         children: list[vrm1_human_bone.HumanBoneStructure] = [
             vrm1_human_bone.HUMAN_BONE_STRUCTURE
         ]

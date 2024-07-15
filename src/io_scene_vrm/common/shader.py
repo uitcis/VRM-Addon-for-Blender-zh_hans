@@ -1,6 +1,7 @@
 import math
 import random
 import string
+import time
 from copy import deepcopy
 from pathlib import Path
 from sys import float_info
@@ -92,8 +93,12 @@ from . import convert
 from .char import INTERNAL_NAME_PREFIX
 from .gl import GL_CLAMP_TO_EDGE, GL_LINEAR, GL_NEAREST, GL_REPEAT
 from .logging import get_logger
+from .version import addon_version
+from .workspace import save_workspace
 
 logger = get_logger(__name__)
+
+LAST_MODIFIED_VERSION: Final = (2, 20, 56)
 
 BOOL_SOCKET_CLASSES: Final = (NodeSocketBool,)
 FLOAT_SOCKET_CLASSES: Final = (
@@ -134,9 +139,84 @@ file_names = [
 OUTLINE_GEOMETRY_GROUP_NAME: Final = "VRM Add-on MToon 1.0 Outline Geometry Revision 1"
 
 UV_GROUP_NAME: Final = "VRM Add-on MToon 1.0 UV Revision 1"
+UV_GROUP_UV_SCALE_X_LABEL: Final = "UV Scale X"
+UV_GROUP_UV_SCALE_X_DEFAULT: Final = 1
+UV_GROUP_UV_SCALE_Y_LABEL: Final = "UV Scale Y"
+UV_GROUP_UV_SCALE_Y_DEFAULT: Final = 1
+UV_GROUP_UV_OFFSET_X_LABEL: Final = "UV Offset X"
+UV_GROUP_UV_OFFSET_X_DEFAULT: Final = 0
+UV_GROUP_UV_OFFSET_Y_LABEL: Final = "UV Offset Y"
+UV_GROUP_UV_OFFSET_Y_DEFAULT: Final = 0
+UV_GROUP_WRAP_S_LABEL: Final = "Wrap S"
+UV_GROUP_WRAP_S_DEFAULT: Final = GL_REPEAT
+UV_GROUP_WRAP_T_LABEL: Final = "Wrap T"
+UV_GROUP_WRAP_T_DEFAULT: Final = GL_REPEAT
+UV_GROUP_IMAGE_WIDTH_LABEL: Final = "Image Width"
+UV_GROUP_IMAGE_HEIGHT_LABEL: Final = "Image Height"
+
 UV_ANIMATION_GROUP_NAME: Final = "VRM Add-on MToon 1.0 UV Animation Revision 1"
+UV_ANIMATION_GROUP_TRANSLATE_X_LABEL: Final = "Translate X"
+UV_ANIMATION_GROUP_TRANSLATE_X_DEFAULT: Final = 0.0
+UV_ANIMATION_GROUP_TRANSLATE_Y_LABEL: Final = "Translate Y"
+UV_ANIMATION_GROUP_TRANSLATE_Y_DEFAULT: Final = 0.0
+UV_ANIMATION_GROUP_ROTATION_LABEL: Final = "Rotation"
+UV_ANIMATION_GROUP_ROTATION_DEFAULT: Final = 0.0
+
 NORMAL_GROUP_NAME: Final = "VRM Add-on MToon 1.0 Normal Revision 1"
+NORMAL_GROUP_SCALE_LABEL: Final = "Normal Map Texture Scale"
+NORMAL_GROUP_SCALE_DEFAULT: Final = 1.0
+NORMAL_GROUP_IS_OUTLINE_LABEL: Final = "Is Outline"
+
 OUTPUT_GROUP_NAME: Final = "VRM Add-on MToon 1.0 Output Revision 1"
+OUTPUT_GROUP_DOUBLE_SIDED_LABEL: Final = "Double Sided"
+OUTPUT_GROUP_TRANSPARENT_WITH_Z_WRITE_LABEL: Final = "Transparent With Z-Write"
+OUTPUT_GROUP_TRANSPARENT_WITH_Z_WRITE_DEFAULT: Final = False
+OUTPUT_GROUP_GI_EQUALIZATION_FACTOR_LABEL: Final = "GI Equalization Factor"
+OUTPUT_GROUP_GI_EQUALIZATION_FACTOR_DEFAULT: Final = 0.9
+OUTPUT_GROUP_RENDER_QUEUE_OFFSET_NUMBER_LABEL: Final = "Render Queue Offset Number"
+OUTPUT_GROUP_RENDER_QUEUE_OFFSET_NUMBER_MIN: Final = -9
+OUTPUT_GROUP_RENDER_QUEUE_OFFSET_NUMBER_DEFAULT: Final = 0
+OUTPUT_GROUP_RENDER_QUEUE_OFFSET_NUMBER_MAX: Final = 9
+OUTPUT_GROUP_BASE_COLOR_FACTOR_COLOR_LABEL: Final = "Lit Color"
+OUTPUT_GROUP_BASE_COLOR_FACTOR_ALPHA_LABEL: Final = "Lit Color Alpha"
+OUTPUT_GROUP_BASE_COLOR_FACTOR_COLOR_DEFAULT: Final = (1.0, 1.0, 1.0)
+OUTPUT_GROUP_BASE_COLOR_FACTOR_ALPHA_DEFAULT: Final = 1.0
+OUTPUT_GROUP_SHADE_COLOR_FACTOR_LABEL: Final = "Shade Color"
+OUTPUT_GROUP_SHADE_COLOR_FACTOR_DEFAULT: Final = (1.0, 1.0, 1.0)
+OUTPUT_GROUP_SHADING_TOONY_FACTOR_LABEL: Final = "Shading Toony"
+OUTPUT_GROUP_SHADING_TOONY_FACTOR_DEFAULT: Final = 0.9
+OUTPUT_GROUP_SHADING_SHIFT_FACTOR_LABEL: Final = "Shading Shift"
+OUTPUT_GROUP_SHADING_SHIFT_FACTOR_DEFAULT: Final = -0.2
+OUTPUT_GROUP_SHADING_SHIFT_TEXTURE_SCALE_LABEL: Final = "Shading Shift Texture Scale"
+OUTPUT_GROUP_SHADING_SHIFT_TEXTURE_SCALE_DEFAULT: Final = 1.0
+OUTPUT_GROUP_EMISSIVE_FACTOR_LABEL: Final = "Emissive Factor"
+OUTPUT_GROUP_EMISSIVE_FACTOR_DEFAULT: Final = (0, 0, 0)
+OUTPUT_GROUP_EMISSIVE_STRENGTH_LABEL: Final = "Emissive Strength"
+OUTPUT_GROUP_EMISSIVE_STRENGTH_DEFAULT: Final = 1.0
+OUTPUT_GROUP_PARAMETRIC_RIM_COLOR_FACTOR_LABEL: Final = "Parametric Rim Color"
+OUTPUT_GROUP_PARAMETRIC_RIM_COLOR_FACTOR_DEFAULT: Final = (0, 0, 0)
+OUTPUT_GROUP_PARAMETRIC_RIM_FRESNEL_POWER_LABEL: Final = "Parametric Rim Fresnel Power"
+OUTPUT_GROUP_PARAMETRIC_RIM_FRESNEL_POWER_DEFAULT: Final = 1.0
+OUTPUT_GROUP_PARAMETRIC_RIM_LIFT_FACTOR_LABEL: Final = "Parametric Rim Lift"
+OUTPUT_GROUP_PARAMETRIC_RIM_LIFT_FACTOR_DEFAULT: Final = 1.0
+OUTPUT_GROUP_RIM_LIGHTING_MIX_FACTOR_LABEL: Final = "Rim LightingMix"
+OUTPUT_GROUP_RIM_LIGHTING_MIX_FACTOR_DEFAULT: Final = 0
+OUTPUT_GROUP_IS_OUTLINE_LABEL: Final = NORMAL_GROUP_IS_OUTLINE_LABEL
+OUTPUT_GROUP_OUTLINE_LIGHTING_MIX_FACTOR_LABEL: Final = "Outline LightingMix"
+OUTPUT_GROUP_OUTLINE_LIGHTING_MIX_FACTOR_DEFAULT: Final = 1.0
+OUTPUT_GROUP_OUTLINE_COLOR_FACTOR_LABEL: Final = "Outline Color"
+OUTPUT_GROUP_OUTLINE_COLOR_FACTOR_DEFAULT: Final = (0, 0, 0)
+OUTPUT_GROUP_OUTLINE_WIDTH_FACTOR_LABEL: Final = "Outline Width"
+OUTPUT_GROUP_OUTLINE_WIDTH_FACTOR_DEFAULT: Final = 0
+OUTPUT_GROUP_OUTLINE_WIDTH_MODE_LABEL: Final = "Outline Width Mode"
+OUTPUT_GROUP_OUTLINE_WIDTH_MODE_MIN: Final = 0
+OUTPUT_GROUP_OUTLINE_WIDTH_MODE_DEFAULT: Final = 0
+OUTPUT_GROUP_OUTLINE_WIDTH_MODE_MAX: Final = 2
+OUTPUT_GROUP_MATCAP_FACTOR_LABEL: Final = "MatCap Factor"
+OUTPUT_GROUP_MATCAP_FACTOR_DEFAULT: Final = (1, 1, 1)
+OUTPUT_GROUP_ALPHA_MODE_LABEL: Final = "Alpha Mode"
+OUTPUT_GROUP_ALPHA_CUTOFF_LABEL: Final = "Alpha Cutoff"
+OUTPUT_GROUP_ALPHA_CUTOFF_DEFAULT: Final = 0.5
 
 SHADER_NODE_GROUP_NAMES: Final = (
     UV_GROUP_NAME,
@@ -163,158 +243,197 @@ def generate_backup_suffix() -> str:
     )
 
 
-def add_shaders() -> None:
+def add_shaders(context: Context) -> None:
     for file_name in file_names:
         path = Path(__file__).with_name(file_name)
-        with bpy.data.libraries.load(str(path), link=False) as (data_from, data_to):
+        with context.blend_data.libraries.load(str(path), link=False) as (
+            data_from,
+            data_to,
+        ):
             for node_group in data_from.node_groups:
-                if node_group not in bpy.data.node_groups:
+                if node_group not in context.blend_data.node_groups:
                     data_to.node_groups.append(node_group)
 
 
-def load_mtoon1_outline_geometry_node_group(context: Context, overwrite: bool) -> None:
-    if bpy.app.version < (3, 3):
+def load_mtoon1_node_group(
+    context: Context,
+    blend_file_path: Path,
+    node_group_name: str,
+    node_group_type: str,
+    node_tree_type: str,
+    *,
+    reset_node_groups: bool,
+) -> None:
+    from ..editor.extension import get_node_tree_extension
+
+    start_time = time.perf_counter()
+
+    if not blend_file_path.exists():
+        logger.error("File not found: %s", blend_file_path)
         return
-    if not overwrite and OUTLINE_GEOMETRY_GROUP_NAME in bpy.data.node_groups:
-        return
+
+    if not reset_node_groups:
+        checking_node_group = context.blend_data.node_groups.get(node_group_name)
+        if checking_node_group:
+            if (
+                tuple(get_node_tree_extension(checking_node_group).addon_version)
+                >= LAST_MODIFIED_VERSION
+            ):
+                return
+            if checking_node_group.type != node_tree_type:
+                message = (
+                    f'Node Group "{node_group_name}" already exists'
+                    + f' with different type "{checking_node_group.type}"'
+                )
+                raise TypeError(message)
 
     backup_suffix = generate_backup_suffix()
 
-    template_outline_group_name = template_name(OUTLINE_GEOMETRY_GROUP_NAME)
-    old_template_outline_group = bpy.data.node_groups.get(template_outline_group_name)
-    if old_template_outline_group:
-        logger.error(f'Node Group "{template_outline_group_name}" already exists')
-        old_template_outline_group.name = backup_name(
-            old_template_outline_group.name, backup_suffix
+    template_node_group_name = template_name(node_group_name)
+    old_template_node_group = context.blend_data.node_groups.get(
+        template_node_group_name
+    )
+    if old_template_node_group:
+        logger.error('Node Group "%s" already exists', template_node_group_name)
+        old_template_node_group.name = backup_name(
+            old_template_node_group.name, backup_suffix
         )
 
-    outline_node_tree_path = (
-        str(Path(__file__).with_name("mtoon1_outline.blend")) + "/NodeTree"
+    node_tree_path = str(blend_file_path) + "/NodeTree"
+
+    # https://projects.blender.org/blender/blender/src/tag/v2.93.18/source/blender/windowmanager/intern/wm_files_link.c#L85-L90
+    with save_workspace(context):
+        node_tree_append_result = bpy.ops.wm.append(
+            filepath=(node_tree_path + "/" + template_node_group_name),
+            filename=template_node_group_name,
+            directory=node_tree_path,
+        )
+        if node_tree_append_result != {"FINISHED"}:
+            raise RuntimeError(
+                "Failed to append MToon 1.0 template node group "
+                + f'"{template_node_group_name}": {node_tree_append_result}'
+            )
+
+    template_node_group = None
+    try:
+        template_node_group = context.blend_data.node_groups.get(
+            template_node_group_name
+        )
+        if not template_node_group:
+            raise ValueError("No " + template_node_group_name)
+
+        node_group = context.blend_data.node_groups.get(node_group_name)
+        if not node_group:
+            node_group = context.blend_data.node_groups.new(
+                node_group_name, node_group_type
+            )
+            clear_node_tree(node_group, clear_inputs_outputs=True)
+        copy_node_tree(context, template_node_group, node_group)
+        get_node_tree_extension(node_group).addon_version = addon_version()
+    finally:
+        if template_node_group and template_node_group.users <= 1:
+            context.blend_data.node_groups.remove(template_node_group)
+
+        # プログラムロジック的には既にremoveされている可能性もあるので、取得しなおす
+        old_template_node_group = context.blend_data.node_groups.get(
+            backup_name(template_node_group_name, backup_suffix)
+        )
+        if old_template_node_group:
+            old_template_node_group.name = template_node_group_name
+
+    end_time = time.perf_counter()
+    logger.debug(
+        'Loaded NodeTree "%s": %.9f seconds', node_group_name, end_time - start_time
     )
 
-    template_outline_group = None
-    # https://projects.blender.org/blender/blender/src/tag/v2.93.18/source/blender/windowmanager/intern/wm_files_link.c#L85-L90
-    if context.object is not None and context.object.mode == "EDIT":
-        bpy.ops.object.mode_set(mode="OBJECT")
-        edit_mode = True
-    else:
-        edit_mode = False
-    try:
-        outline_node_tree_append_result = bpy.ops.wm.append(
-            filepath=(outline_node_tree_path + "/" + template_outline_group_name),
-            filename=template_outline_group_name,
-            directory=outline_node_tree_path,
+
+def load_mtoon1_outline_geometry_node_group(
+    context: Context, *, reset_node_groups: bool
+) -> None:
+    if bpy.app.version < (3, 3):
+        return
+    load_mtoon1_node_group(
+        context,
+        Path(__file__).with_name("mtoon1_outline.blend"),
+        OUTLINE_GEOMETRY_GROUP_NAME,
+        "GeometryNodeTree",
+        "GEOMETRY",
+        reset_node_groups=reset_node_groups,
+    )
+
+
+def load_mtoon1_shader_node_groups(
+    context: Context, *, reset_node_groups: bool
+) -> None:
+    for shader_node_group_name in SHADER_NODE_GROUP_NAMES:
+        load_mtoon1_node_group(
+            context,
+            Path(__file__).with_name("mtoon1.blend"),
+            shader_node_group_name,
+            "ShaderNodeTree",
+            "SHADER",
+            reset_node_groups=reset_node_groups,
         )
-
-        if edit_mode:
-            bpy.ops.object.mode_set(mode="EDIT")
-            edit_mode = False
-
-        if outline_node_tree_append_result != {"FINISHED"}:
-            raise RuntimeError(
-                "Failed to append MToon 1.0 outline template material: "
-                + f"{outline_node_tree_append_result}"
-            )
-        template_outline_group = bpy.data.node_groups.get(template_outline_group_name)
-        if not template_outline_group:
-            raise ValueError("No " + template_outline_group_name)
-
-        outline_group = bpy.data.node_groups.get(OUTLINE_GEOMETRY_GROUP_NAME)
-        if not outline_group:
-            outline_group = bpy.data.node_groups.new(
-                OUTLINE_GEOMETRY_GROUP_NAME, "GeometryNodeTree"
-            )
-            clear_node_tree(outline_group, clear_inputs_outputs=True)
-            copy_node_tree(template_outline_group, outline_group)
-        elif overwrite:
-            copy_node_tree(template_outline_group, outline_group)
-    finally:
-        if template_outline_group and template_outline_group.users <= 1:
-            bpy.data.node_groups.remove(template_outline_group)
-        if edit_mode:
-            bpy.ops.object.mode_set(mode="EDIT")
-
-        old_template_outline_group = bpy.data.node_groups.get(
-            backup_name(template_outline_group_name, backup_suffix)
-        )
-        if old_template_outline_group:
-            old_template_outline_group.name = template_outline_group_name
 
 
 def load_mtoon1_shader(
     context: Context,
     material: Material,
-    overwrite: bool,
+    *,
+    reset_node_groups: bool,
 ) -> None:
     if not material.use_nodes:
         material.use_nodes = True
 
-    load_mtoon1_outline_geometry_node_group(context, overwrite)
+    load_mtoon1_outline_geometry_node_group(
+        context, reset_node_groups=reset_node_groups
+    )
+    load_mtoon1_shader_node_groups(context, reset_node_groups=reset_node_groups)
+
+    start_time = time.perf_counter()
 
     backup_suffix = generate_backup_suffix()
 
+    # アペンドされるマテリアルと同名のものある場合は退避する。
+    # 将来的にはappend(do_reuse_local_id=True)で代替する。
     template_material_name = template_name("VRM Add-on MToon 1.0")
-    old_material = bpy.data.materials.get(template_material_name)
+    old_material = context.blend_data.materials.get(template_material_name)
     if old_material:
-        logger.error(f'Material "{template_material_name}" already exists')
+        logger.error('Material "%s" already exists', template_material_name)
         old_material.name = backup_name(old_material.name, backup_suffix)
 
+    # Materialをアペンドする際にNodeTreeも同時にアペンドされる。
+    # それらと同名のNodeTreeが存在する場合は退避する。
     for shader_node_group_name in SHADER_NODE_GROUP_NAMES:
         name = template_name(shader_node_group_name)
-        old_template_group = bpy.data.node_groups.get(name)
+        old_template_group = context.blend_data.node_groups.get(name)
         if old_template_group:
-            logger.error(f'Node Group "{name}" already exists')
+            logger.error('Node Group "%s" already exists', name)
             old_template_group.name = backup_name(
                 old_template_group.name, backup_suffix
             )
 
     material_path = str(Path(__file__).with_name("mtoon1.blend")) + "/Material"
 
-    template_material = None
-
-    # https://git.blender.org/gitweb/gitweb.cgi/blender.git/blob/v2.83:/source/blender/windowmanager/intern/wm_files_link.c#l84
-    if context.object is not None and context.object.mode == "EDIT":
-        bpy.ops.object.mode_set(mode="OBJECT")
-        edit_mode = True
-    else:
-        edit_mode = False
-    try:
+    # https://projects.blender.org/blender/blender/src/tag/v2.93.18/source/blender/windowmanager/intern/wm_files_link.c#L85-L90
+    with save_workspace(context):
         material_append_result = bpy.ops.wm.append(
             filepath=material_path + "/" + template_material_name,
             filename=template_material_name,
             directory=material_path,
+            # do_reuse_local_id=True
         )
-
-        if edit_mode:
-            bpy.ops.object.mode_set(mode="EDIT")
-            edit_mode = False
-
         if material_append_result != {"FINISHED"}:
             raise RuntimeError(
                 "Failed to append MToon 1.0 template material: "
                 + f"{material_append_result}"
             )
 
-        template_material = bpy.data.materials.get(template_material_name)
+    template_material = None
+    try:
+        template_material = context.blend_data.materials.get(template_material_name)
         if not template_material:
             raise ValueError("No " + template_material_name)
-
-        for shader_node_group_name in SHADER_NODE_GROUP_NAMES:
-            shader_node_group_template_name = template_name(shader_node_group_name)
-            template_group = bpy.data.node_groups.get(shader_node_group_template_name)
-            if not template_group:
-                raise ValueError("No " + shader_node_group_template_name)
-
-            group = bpy.data.node_groups.get(shader_node_group_name)
-            if not group:
-                group = bpy.data.node_groups.new(
-                    shader_node_group_name, "ShaderNodeTree"
-                )
-                clear_node_tree(group, clear_inputs_outputs=True)
-                copy_node_tree(template_group, group)
-            elif overwrite:
-                copy_node_tree(template_group, group)
-
         template_material_node_tree = template_material.node_tree
         material_node_tree = material.node_tree
         if template_material_node_tree is None:
@@ -322,34 +441,40 @@ def load_mtoon1_shader(
         elif material_node_tree is None:
             logger.error("MToon copy target material node tree is None")
         else:
-            copy_node_tree(template_material_node_tree, material_node_tree)
+            copy_node_tree(context, template_material_node_tree, material_node_tree)
     finally:
         if template_material and template_material.users <= 1:
-            bpy.data.materials.remove(template_material)
+            context.blend_data.materials.remove(template_material)
 
-        # reload and remove template groups
+        # Materialをアペンドする際に同時にアペンドされたNodeTreeを削除
         for shader_node_group_name in SHADER_NODE_GROUP_NAMES:
             shader_node_group_template_name = template_name(shader_node_group_name)
-            template_group = bpy.data.node_groups.get(shader_node_group_template_name)
+            template_group = context.blend_data.node_groups.get(
+                shader_node_group_template_name
+            )
             if template_group and template_group.users <= 1:
-                bpy.data.node_groups.remove(template_group)
+                context.blend_data.node_groups.remove(template_group)
 
-        if edit_mode:
-            bpy.ops.object.mode_set(mode="EDIT")
-
-        old_material = bpy.data.materials.get(
+        # プログラムロジック的には既にremoveされている可能性もあるので、取得しなおす
+        old_material = context.blend_data.materials.get(
             backup_name(template_material_name, backup_suffix)
         )
         if old_material:
             old_material.name = template_material_name
 
+        # 退避していたNodeTreeを復元する
         for shader_node_group_name in SHADER_NODE_GROUP_NAMES:
             name = template_name(shader_node_group_name)
-            old_template_group = bpy.data.node_groups.get(
+            old_template_group = context.blend_data.node_groups.get(
                 backup_name(name, backup_suffix)
             )
             if old_template_group:
                 old_template_group.name = name
+
+    end_time = time.perf_counter()
+    logger.debug(
+        'Loaded Material "%s": %.9f seconds', material.name, end_time - start_time
+    )
 
 
 def copy_socket(from_socket: NodeSocket, to_socket: NodeSocket) -> None:
@@ -392,6 +517,7 @@ def copy_socket_interface(
         to_socket.bl_label = from_socket.bl_label
     to_socket.description = from_socket.description
     to_socket.name = from_socket.name
+    to_socket.hide_value = from_socket.hide_value
 
     float_classes = (
         NodeSocketInterfaceFloat,
@@ -495,29 +621,35 @@ def copy_node_socket_default_value(
 
 
 def copy_shader_node_group(
+    context: Context,
     from_node: ShaderNodeGroup,
     to_node: ShaderNodeGroup,
 ) -> None:
+    node_tree = from_node.node_tree
+    if not node_tree:
+        logger.error("No node_tree in ShaderNodeGroup: %s", from_node.name)
+        return
+
     for shader_node_group_name in SHADER_NODE_GROUP_NAMES:
         shader_node_group_template_name = template_name(shader_node_group_name)
-        if not from_node.node_tree.name.startswith(shader_node_group_template_name):
+        if not node_tree.name.startswith(shader_node_group_template_name):
             continue
 
-        group = bpy.data.node_groups.get(shader_node_group_name)
+        group = context.blend_data.node_groups.get(shader_node_group_name)
         if not group:
-            logger.error(f'"{shader_node_group_name}" Not Found')
+            logger.error('"%s" Not Found', shader_node_group_name)
             continue
 
         to_node.node_tree = group
         return
 
     logger.error(
-        "Importing ShaderNodeGroup doesn't be supported yet: "
-        + f"{from_node.node_tree.name}"
+        "Importing ShaderNodeGroup doesn't be supported yet: %s", node_tree.name
     )
 
 
 def copy_node(
+    context: Context,
     from_node: Node,
     to_node: Node,
     from_to: dict[Node, Node],
@@ -550,10 +682,10 @@ def copy_node(
             copy_socket(from_output, to_output)
     if from_node.parent:
         to_node.parent = from_to.get(from_node.parent)
-    to_node.select = from_node.select
+    to_node.select = False
     to_node.show_options = from_node.show_options
     to_node.show_preview = from_node.show_preview
-    to_node.show_texture = from_node.show_texture
+    to_node.show_texture = False
     to_node.use_custom_color = from_node.use_custom_color
     to_node.width = from_node.width
 
@@ -667,6 +799,9 @@ def copy_node(
         to_node.interpolation = from_node.interpolation
         to_node.projection = from_node.projection
         to_node.projection_blend = from_node.projection_blend
+        if to_node.name == "Mtoon1BaseColorTexture.Image":
+            to_node.select = True
+            to_node.show_texture = True
     if isinstance(from_node, ShaderNodeTexIES) and isinstance(
         to_node, ShaderNodeTexIES
     ):
@@ -765,7 +900,7 @@ def copy_node(
         to_node.clamp = from_node.clamp
         to_node.interpolation_type = from_node.interpolation_type
     if isinstance(from_node, ShaderNodeGroup) and isinstance(to_node, ShaderNodeGroup):
-        copy_shader_node_group(from_node, to_node)
+        copy_shader_node_group(context, from_node, to_node)
     if isinstance(from_node, ShaderNodeDisplacement) and isinstance(
         to_node, ShaderNodeDisplacement
     ):
@@ -888,7 +1023,7 @@ def copy_node(
 
 
 def clear_node_tree(
-    node_tree: Optional[NodeTree], clear_inputs_outputs: bool = False
+    node_tree: Optional[NodeTree], *, clear_inputs_outputs: bool = False
 ) -> None:
     if node_tree is None:
         return
@@ -981,6 +1116,9 @@ def copy_node_tree_interface_socket(
         NodeTreeInterfaceSocketFloatTime,
         NodeTreeInterfaceSocketFloatTimeAbsolute,
         NodeTreeInterfaceSocketFloatUnsigned,
+        NodeTreeInterfaceSocketInt,
+        NodeTreeInterfaceSocketIntFactor,
+        NodeTreeInterfaceSocketIntPercentage,
         NodeTreeInterfaceSocketVector,
         NodeTreeInterfaceSocketVectorAcceleration,
         NodeTreeInterfaceSocketVectorDirection,
@@ -1000,6 +1138,11 @@ def copy_node_tree_interface_socket(
         NodeTreeInterfaceSocketFloatTimeAbsolute,
         NodeTreeInterfaceSocketFloatUnsigned,
     )
+    int_classes = (
+        NodeTreeInterfaceSocketInt,
+        NodeTreeInterfaceSocketIntFactor,
+        NodeTreeInterfaceSocketIntPercentage,
+    )
     color_classes = (NodeTreeInterfaceSocketColor,)
     vector_classes = (
         NodeTreeInterfaceSocketVector,
@@ -1013,11 +1156,22 @@ def copy_node_tree_interface_socket(
 
     to_socket.attribute_domain = from_socket.attribute_domain
     to_socket.default_attribute_name = from_socket.default_attribute_name
+    to_socket.hide_value = from_socket.hide_value
+    to_socket.hide_in_modifier = from_socket.hide_in_modifier
+    to_socket.force_non_field = from_socket.force_non_field
 
     if isinstance(from_socket, float_classes) and isinstance(to_socket, float_classes):
         to_socket.default_value = from_socket.default_value
         to_socket.min_value = from_socket.min_value
         to_socket.max_value = from_socket.max_value
+    elif isinstance(from_socket, float_classes) and isinstance(to_socket, int_classes):
+        max_int = 1_000_000_000
+        min_int = -1_000_000_000
+        to_socket.default_value = int(
+            min(max(min_int, from_socket.default_value), max_int)
+        )
+        to_socket.min_value = int(min(max(min_int, from_socket.min_value), max_int))
+        to_socket.max_value = int(min(max(min_int, from_socket.max_value), max_int))
     elif isinstance(from_socket, color_classes) and isinstance(
         to_socket, color_classes
     ):
@@ -1037,7 +1191,35 @@ def copy_node_tree_interface_socket(
 
 
 def copy_node_tree_interface(from_node_tree: NodeTree, to_node_tree: NodeTree) -> None:
-    from bpy.types import NodeTreeInterfaceSocket, NodeTreeInterfaceSocketFloatFactor
+    from bpy.types import (
+        NodeTreeInterfaceSocket,
+        NodeTreeInterfaceSocketFloatFactor,
+    )
+
+    socket_type_to_group_name_to_socket_names: dict[str, dict[str, list[str]]] = {
+        "NodeSocketBool": {
+            OUTPUT_GROUP_NAME: [
+                OUTPUT_GROUP_DOUBLE_SIDED_LABEL,
+                OUTPUT_GROUP_TRANSPARENT_WITH_Z_WRITE_LABEL,
+                OUTPUT_GROUP_IS_OUTLINE_LABEL,
+            ],
+            NORMAL_GROUP_NAME: [
+                NORMAL_GROUP_IS_OUTLINE_LABEL,
+            ],
+        },
+        "NodeSocketInt": {
+            OUTPUT_GROUP_NAME: [
+                OUTPUT_GROUP_RENDER_QUEUE_OFFSET_NUMBER_LABEL,
+                OUTPUT_GROUP_OUTLINE_WIDTH_MODE_LABEL,
+            ],
+            UV_GROUP_NAME: [
+                UV_GROUP_WRAP_S_LABEL,
+                UV_GROUP_WRAP_T_LABEL,
+                UV_GROUP_IMAGE_WIDTH_LABEL,
+                UV_GROUP_IMAGE_HEIGHT_LABEL,
+            ],
+        },
+    }
 
     to_items_index = 0
 
@@ -1049,13 +1231,26 @@ def copy_node_tree_interface(from_node_tree: NodeTree, to_node_tree: NodeTree) -
         from_socket_type = from_item.socket_type
         if not from_socket_type:
             logger.error(
-                f"{from_item.name} has empty socket_type."
-                + f" type={type(from_item).__name__}"
+                "%s has empty socket_type. type=%s",
+                from_item.name,
+                type(from_item).__name__,
             )
             if isinstance(from_item, NodeTreeInterfaceSocketFloatFactor):
                 from_socket_type = "NodeSocketFloat"
             else:
                 continue
+
+        if bpy.app.version >= (4, 1):
+            for (
+                socket_type,
+                group_name_to_socket_names,
+            ) in socket_type_to_group_name_to_socket_names.items():
+                socket_names = group_name_to_socket_names.get(to_node_tree.name)
+                if not socket_names:
+                    continue
+                if from_item.name in socket_names:
+                    from_socket_type = socket_type
+                    break
 
         to_socket: Optional[NodeTreeInterfaceSocket] = None
         while len(to_node_tree.interface.items_tree) > to_items_index:
@@ -1092,7 +1287,9 @@ def copy_node_tree_interface(from_node_tree: NodeTree, to_node_tree: NodeTree) -
         )
 
 
-def copy_node_tree(from_node_tree: NodeTree, to_node_tree: NodeTree) -> None:
+def copy_node_tree(
+    context: Context, from_node_tree: NodeTree, to_node_tree: NodeTree
+) -> None:
     clear_node_tree(to_node_tree, clear_inputs_outputs=False)
 
     if bpy.app.version < (4, 0):
@@ -1102,12 +1299,14 @@ def copy_node_tree(from_node_tree: NodeTree, to_node_tree: NodeTree) -> None:
 
     from_to: dict[Node, Node] = {}
 
-    for from_node in from_node_tree.nodes:
+    # Use sorted because glTF add-on uses index-aware logic.
+    # https://github.com/KhronosGroup/glTF-Blender-IO/blob/86453b20c28d7c78a3f9106911df69fd0138fb2a/addons/io_scene_gltf2/blender/exp/material/gltf2_blender_search_node_tree.py#L806
+    for from_node in sorted(from_node_tree.nodes, key=lambda n: n.name):
         to_node = to_node_tree.nodes.new(from_node.bl_idname)
         from_to[from_node] = to_node
 
     for from_node, to_node in from_to.items():
-        copy_node(from_node, to_node, from_to)
+        copy_node(context, from_node, to_node, from_to)
 
     for from_link in from_node_tree.links:
         if not from_link.is_valid:
@@ -1128,13 +1327,14 @@ def copy_node_tree(from_node_tree: NodeTree, to_node_tree: NodeTree) -> None:
             continue
         if not 0 <= input_socket_index < len(input_node.inputs):
             logger.error(
-                "Input socket out of range: "
-                + f"{input_socket_index} < {len(input_node.inputs)}"
+                "Input socket out of range: %d < %d",
+                input_socket_index,
+                len(input_node.inputs),
             )
             continue
         input_socket = input_node.inputs[input_socket_index]
         if not input_socket:
-            logger.error(f"No input socket: {from_link.to_socket.name}")
+            logger.error("No input socket: %s", from_link.to_socket.name)
             continue
 
         output_socket_index = next(
@@ -1152,13 +1352,14 @@ def copy_node_tree(from_node_tree: NodeTree, to_node_tree: NodeTree) -> None:
             continue
         if not 0 <= output_socket_index < len(output_node.outputs):
             logger.error(
-                "Output socket out of range: "
-                + f"{output_socket_index} < {len(output_node.outputs)}"
+                "Output socket out of range: %d < %d",
+                output_socket_index,
+                len(output_node.outputs),
             )
             continue
         output_socket = output_node.outputs[output_socket_index]
         if not output_socket:
-            logger.error(f"No output socket: {from_link.from_socket.name}")
+            logger.error("No output socket: %s", from_link.from_socket.name)
             continue
 
         to_node_tree.links.new(input_socket, output_socket)
@@ -1166,9 +1367,9 @@ def copy_node_tree(from_node_tree: NodeTree, to_node_tree: NodeTree) -> None:
     for from_node, to_node in from_to.items():
         copy_node_socket_default_value(from_node, to_node)
 
-    # 親子関係の辻褄が合った状態でもう一度場所を設定することで
-    # 完全にノードの位置を復元できる
     for from_node, to_node in from_to.items():
+        # The location of the node can be completely restored by setting the location
+        # again with a consistent parent-child relationship.
         to_node.location = deepcopy(
             (
                 from_node.location[0],
@@ -1177,8 +1378,8 @@ def copy_node_tree(from_node_tree: NodeTree, to_node_tree: NodeTree) -> None:
         )
 
 
-def shader_node_group_import(shader_node_group_name: str) -> None:
-    if shader_node_group_name in bpy.data.node_groups:
+def shader_node_group_import(context: Context, shader_node_group_name: str) -> None:
+    if shader_node_group_name in context.blend_data.node_groups:
         return
     for file_name in file_names:
         path = str(Path(__file__).with_name(file_name)) + "/NodeTree"

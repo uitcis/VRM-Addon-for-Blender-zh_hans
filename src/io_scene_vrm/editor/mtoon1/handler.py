@@ -6,6 +6,7 @@ from bpy.app.handlers import persistent
 from bpy.types import Mesh
 
 from ...common.logging import get_logger
+from ..extension import get_material_extension
 from .ops import VRM_OT_refresh_mtoon1_outline, delayed_start_for_viewport_matrix
 
 logger = get_logger(__name__)
@@ -15,24 +16,26 @@ previous_object_material_state: list[list[Optional[tuple[str, bool, bool]]]] = [
 
 
 def update_mtoon1_outline() -> Optional[float]:
+    context = bpy.context
+
     compare_start_time = time.perf_counter()
 
-    # ここは最適化の必要がある
+    # Optimize appropriately.
     has_auto_smooth = tuple(bpy.app.version) < (4, 1)
     object_material_state = [
         [
             (
                 material_slot.material.name,
-                material_slot.material.vrm_addon_extension.mtoon1.get_enabled_in_material(
+                get_material_extension(
                     material_slot.material
-                ),
+                ).mtoon1.get_enabled_in_material(material_slot.material),
                 has_auto_smooth and obj.data.use_auto_smooth,
             )
             if material_slot.material
             else None
             for material_slot in obj.material_slots
         ]
-        for obj in bpy.data.objects
+        for obj in context.blend_data.objects
         if isinstance(obj.data, Mesh)
     ]
     not_changed = object_material_state == previous_object_material_state
@@ -78,11 +81,11 @@ def check_matcap_operator_status(dummy: object = None) -> None:
 
 
 @persistent
-def save_pre(_dummy: object) -> None:
+def save_pre(_unused: object) -> None:
     update_mtoon1_outline()
 
 
 @persistent
-def depsgraph_update_pre(_dummy: object) -> None:
+def depsgraph_update_pre(_unused: object) -> None:
     trigger_update_mtoon1_outline()
     check_matcap_operator_status()

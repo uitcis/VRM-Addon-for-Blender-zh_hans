@@ -8,6 +8,13 @@ from pathlib import Path
 
 import bpy
 
+# This is not necessary if executed from poetry
+sys.path.append(str(Path(__file__).parent.parent / "src"))
+
+from io_scene_vrm.common import ops
+
+context = bpy.context
+
 addon_path = sys.argv[sys.argv.index("--") + 1]
 
 with zipfile.ZipFile(addon_path) as z:
@@ -31,13 +38,13 @@ actual_path = repository_root_dir / "out.vrm"
 
 bpy.ops.object.select_all(action="SELECT")
 bpy.ops.object.delete()
-while bpy.data.collections:
-    bpy.data.collections.remove(bpy.data.collections[0])
+while context.blend_data.collections:
+    context.blend_data.collections.remove(context.blend_data.collections[0])
 
-if bpy.ops.import_scene.vrm(filepath=str(input_path)) != {"FINISHED"}:
+if ops.import_scene.vrm(filepath=str(input_path)) != {"FINISHED"}:
     message = f"Import failure: {input_path}"
     raise AssertionError(message)
-if bpy.ops.export_scene.vrm(filepath=str(actual_path)) != {"FINISHED"}:
+if ops.export_scene.vrm(filepath=str(actual_path)) != {"FINISHED"}:
     message = f"Export failure: {actual_path}"
     raise AssertionError(message)
 

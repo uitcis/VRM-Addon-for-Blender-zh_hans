@@ -2,18 +2,21 @@ import json
 import tempfile
 
 import bpy
-from bpy.types import Armature
+from bpy.types import Armature, Context
+
+from io_scene_vrm.common import ops
+from io_scene_vrm.editor.extension import get_armature_extension
 
 
-def test() -> None:
-    bpy.ops.icyp.make_basic_armature()
+def test(context: Context) -> None:
+    ops.icyp.make_basic_armature()
 
     new_head_name = "root"
     with tempfile.NamedTemporaryFile(delete=False) as file:
         file.write(json.dumps({"head": new_head_name}).encode())
         file.close()
-        bpy.ops.vrm.load_human_bone_mappings(filepath=file.name)
-    active_object = bpy.context.active_object
+        ops.vrm.load_human_bone_mappings(filepath=file.name)
+    active_object = context.view_layer.objects.active
     if not active_object:
         raise AssertionError
     data = active_object.data
@@ -22,7 +25,7 @@ def test() -> None:
 
     b = next(
         human_bone
-        for human_bone in data.vrm_addon_extension.vrm0.humanoid.human_bones
+        for human_bone in get_armature_extension(data).vrm0.humanoid.human_bones
         if human_bone.bone == "head"
     )
     assert (
@@ -31,4 +34,4 @@ def test() -> None:
 
 
 if __name__ == "__main__":
-    test()
+    test(bpy.context)

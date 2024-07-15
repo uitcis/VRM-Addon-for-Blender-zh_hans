@@ -7,8 +7,8 @@ from bpy.types import Armature, Context, Mesh, Object, Panel, UILayout
 from ...common.logging import get_logger
 from ...common.vrm1.human_bone import HumanBoneSpecifications
 from .. import ops, search
-from ..extension import VrmAddonSceneExtensionPropertyGroup
-from ..migration import migrate
+from ..extension import get_armature_extension, get_bone_extension
+from ..migration import defer_migrate
 from ..ops import layout_operator
 from ..panel import VRM_PT_vrm_armature_object_property, draw_template_list
 from ..search import active_object_is_vrm1_armature
@@ -218,15 +218,16 @@ def draw_vrm1_humanoid_optional_bones_layout(
 
 
 def draw_vrm1_humanoid_layout(
+    context: Context,
     armature: Object,
     layout: UILayout,
     humanoid: Vrm1HumanoidPropertyGroup,
 ) -> None:
-    if migrate(armature.name, defer=True):
+    if defer_migrate(armature.name):
         data = armature.data
         if not isinstance(data, Armature):
             return
-        Vrm1HumanBonesPropertyGroup.update_all_node_candidates(data.name, defer=True)
+        Vrm1HumanBonesPropertyGroup.defer_update_all_node_candidates(data.name)
 
     data = armature.data
     if not isinstance(data, Armature):
@@ -244,7 +245,7 @@ def draw_vrm1_humanoid_layout(
         column.prop_search(
             humanoid,
             "pose_library",
-            bpy.data,
+            context.blend_data,
             "actions",
             text=label,
             translate=False,
@@ -323,9 +324,10 @@ class VRM_PT_vrm1_humanoid_armature_object_property(Panel):
         if not isinstance(armature_data, Armature):
             return
         draw_vrm1_humanoid_layout(
+            context,
             active_object,
             self.layout,
-            armature_data.vrm_addon_extension.vrm1.humanoid,
+            get_armature_extension(armature_data).vrm1.humanoid,
         )
 
 
@@ -353,20 +355,20 @@ class VRM_PT_vrm1_humanoid_ui(Panel):
         if not isinstance(armature_data, Armature):
             return
         draw_vrm1_humanoid_layout(
-            armature, self.layout, armature_data.vrm_addon_extension.vrm1.humanoid
+            context,
+            armature,
+            self.layout,
+            get_armature_extension(armature_data).vrm1.humanoid,
         )
 
 
 def draw_vrm1_first_person_layout(
     armature: Object,
-    context: Context,
+    _context: Context,
     layout: UILayout,
     first_person: Vrm1FirstPersonPropertyGroup,
 ) -> None:
-    if migrate(armature.name, defer=True):
-        VrmAddonSceneExtensionPropertyGroup.check_mesh_object_names_and_update(
-            context.scene.name
-        )
+    defer_migrate(armature.name)
     column = layout.column()
     column.label(text="Mesh Annotations", icon="FULLSCREEN_EXIT")
 
@@ -425,7 +427,7 @@ class VRM_PT_vrm1_first_person_armature_object_property(Panel):
             active_object,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm1.first_person,
+            get_armature_extension(armature_data).vrm1.first_person,
         )
 
 
@@ -456,7 +458,7 @@ class VRM_PT_vrm1_first_person_ui(Panel):
             armature,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm1.first_person,
+            get_armature_extension(armature_data).vrm1.first_person,
         )
 
 
@@ -466,7 +468,7 @@ def draw_vrm1_look_at_layout(
     layout: UILayout,
     look_at: Vrm1LookAtPropertyGroup,
 ) -> None:
-    migrate(armature.name, defer=True)
+    defer_migrate(armature.name)
 
     layout.prop(look_at, "enable_preview")
 
@@ -532,7 +534,7 @@ class VRM_PT_vrm1_look_at_armature_object_property(Panel):
             active_object,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm1.look_at,
+            get_armature_extension(armature_data).vrm1.look_at,
         )
 
 
@@ -563,7 +565,7 @@ class VRM_PT_vrm1_look_at_ui(Panel):
             armature,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm1.look_at,
+            get_armature_extension(armature_data).vrm1.look_at,
         )
 
 
@@ -572,18 +574,12 @@ def draw_vrm1_expressions_morph_target_bind_layout(
     layout: UILayout,
     bind: Vrm1MorphTargetBindPropertyGroup,
 ) -> None:
-    VrmAddonSceneExtensionPropertyGroup.check_mesh_object_names_and_update(
-        context.scene.name
-    )
-
     blend_data = context.blend_data
 
     bind_column = layout.column()
-    bind_column.prop_search(
+    bind_column.prop(
         bind.node,
-        "mesh_object_name",
-        context.scene.vrm_addon_extension,
-        "mesh_object_names",
+        "bpy_object",
         text="Mesh",
         icon="OUTLINER_OB_MESH",
     )
@@ -647,10 +643,7 @@ def draw_vrm1_expressions_layout(
     layout: UILayout,
     expressions: Vrm1ExpressionsPropertyGroup,
 ) -> None:
-    if migrate(armature.name, defer=True):
-        VrmAddonSceneExtensionPropertyGroup.check_mesh_object_names_and_update(
-            context.scene.name
-        )
+    defer_migrate(armature.name)
 
     preset_expressions = list(expressions.preset.name_to_expression_dict().values())
 
@@ -691,7 +684,7 @@ def draw_vrm1_expressions_layout(
             expression.name
         )
         if not preset_icon:
-            logger.error(f"Unknown preset expression: {expression.name}")
+            logger.error("Unknown preset expression: %s", expression.name)
             preset_icon = "SHAPEKEY_DATA"
         layout.label(text=expression.name, translate=False, icon=preset_icon)
     elif 0 <= custom_index < len(expressions.custom):
@@ -859,7 +852,7 @@ class VRM_PT_vrm1_expressions_armature_object_property(Panel):
             active_object,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm1.expressions,
+            get_armature_extension(armature_data).vrm1.expressions,
         )
 
 
@@ -890,7 +883,7 @@ class VRM_PT_vrm1_expressions_ui(Panel):
             armature,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm1.expressions,
+            get_armature_extension(armature_data).vrm1.expressions,
         )
 
 
@@ -900,7 +893,7 @@ def draw_vrm1_meta_layout(
     layout: UILayout,
     meta: Vrm1MetaPropertyGroup,
 ) -> None:
-    migrate(armature.name, defer=True)
+    defer_migrate(armature.name)
 
     thumbnail_column = layout.column()
     thumbnail_column.label(text="Thumbnail:")
@@ -1009,7 +1002,7 @@ class VRM_PT_vrm1_meta_armature_object_property(Panel):
         armature_data = active_object.data
         if not isinstance(armature_data, Armature):
             return
-        ext = armature_data.vrm_addon_extension
+        ext = get_armature_extension(armature_data)
         draw_vrm1_meta_layout(active_object, context, self.layout, ext.vrm1.meta)
 
 
@@ -1040,7 +1033,7 @@ class VRM_PT_vrm1_meta_ui(Panel):
             armature,
             context,
             self.layout,
-            armature_data.vrm_addon_extension.vrm1.meta,
+            get_armature_extension(armature_data).vrm1.meta,
         )
 
 
@@ -1078,6 +1071,6 @@ class VRM_PT_vrm1_bone_property(Panel):
         bone = armature_data.bones.active
         if not bone:
             return
-        ext = bone.vrm_addon_extension
+        ext = get_bone_extension(bone)
         layout = self.layout
         layout.prop(ext, "axis_translation")

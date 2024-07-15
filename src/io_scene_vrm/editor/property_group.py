@@ -27,7 +27,7 @@ class StringPropertyGroup(PropertyGroup):
         return str(value)
 
     def set_value(self, value: str) -> None:
-        self.name = value  # pylint: disable=attribute-defined-outside-init
+        self.name = value
         self["value"] = value
 
     value: StringProperty(  # type: ignore[valid-type]
@@ -50,7 +50,7 @@ class FloatPropertyGroup(PropertyGroup):
         return 0.0
 
     def set_value(self, value: float) -> None:
-        self.name = str(value)  # pylint: disable=attribute-defined-outside-init
+        self.name = str(value)
         self["value"] = value
 
     value: FloatProperty(  # type: ignore[valid-type]
@@ -76,14 +76,16 @@ class MeshObjectPropertyGroup(PropertyGroup):
         return str(self.bpy_object.name)
 
     def set_mesh_object_name(self, value: object) -> None:
+        context = bpy.context
+
         if (
             not isinstance(value, str)
-            or value not in bpy.data.objects
-            or bpy.data.objects[value].type != "MESH"
+            or value not in context.blend_data.objects
+            or context.blend_data.objects[value].type != "MESH"
         ):
             self.bpy_object = None
             return
-        self.bpy_object = bpy.data.objects[value]
+        self.bpy_object = context.blend_data.objects[value]
 
     mesh_object_name: StringProperty(  # type: ignore[valid-type]
         get=get_mesh_object_name, set=set_mesh_object_name
@@ -92,14 +94,14 @@ class MeshObjectPropertyGroup(PropertyGroup):
     def get_value(self) -> str:
         logger.warning(
             "MeshObjectPropertyGroup.value is deprecated."
-            + " Use MeshObjectPropertyGroup.mesh_object_name instead."
+            " Use MeshObjectPropertyGroup.mesh_object_name instead."
         )
         return str(self.mesh_object_name)
 
     def set_value(self, value: str) -> None:
         logger.warning(
             "MeshObjectPropertyGroup.value is deprecated."
-            + " Use MeshObjectPropertyGroup.mesh_object_name instead."
+            " Use MeshObjectPropertyGroup.mesh_object_name instead."
         )
         self.mesh_object_name = value
 
@@ -109,8 +111,12 @@ class MeshObjectPropertyGroup(PropertyGroup):
         set=set_value,
     )
 
+    def poll_bpy_object(self, obj: object) -> bool:
+        return isinstance(obj, Object) and obj.type == "MESH"
+
     bpy_object: PointerProperty(  # type: ignore[valid-type]
-        type=Object
+        type=Object,
+        poll=poll_bpy_object,
     )
 
     if TYPE_CHECKING:
@@ -126,10 +132,12 @@ class BonePropertyGroup(PropertyGroup):
     def get_all_bone_property_groups(
         armature: Object,
     ) -> Iterator["BonePropertyGroup"]:
+        from .extension import get_armature_extension
+
         armature_data = armature.data
         if not isinstance(armature_data, Armature):
             return
-        ext = armature_data.vrm_addon_extension
+        ext = get_armature_extension(armature_data)
         yield ext.vrm0.first_person.first_person_bone
         for human_bone in ext.vrm0.humanoid.human_bones:
             yield human_bone.node
@@ -210,17 +218,21 @@ class BonePropertyGroup(PropertyGroup):
         return result
 
     def get_bone_name(self) -> str:
+        from .extension import get_bone_extension
+
+        context = bpy.context
+
         if not self.bone_uuid:
             return ""
         if not self.armature_data_name:
             return ""
-        armature_data = bpy.data.armatures.get(self.armature_data_name)
+        armature_data = context.blend_data.armatures.get(self.armature_data_name)
         if not armature_data:
             return ""
 
         # TODO: Optimization
         for bone in armature_data.bones:
-            if bone.vrm_addon_extension.uuid == self.bone_uuid:
+            if get_bone_extension(bone).uuid == self.bone_uuid:
                 return bone.name
 
         return ""
@@ -231,14 +243,17 @@ class BonePropertyGroup(PropertyGroup):
         )
 
     def set_bone_name(
-        self, value: Optional[str], refresh_node_candidates: bool = False
+        self, value: Optional[str], *, refresh_node_candidates: bool = False
     ) -> None:
+        from .extension import get_armature_extension, get_bone_extension
+
+        context = bpy.context
+
         armature: Optional[Object] = None
 
-        # アーマチュアの複製が行われた場合を考えて
-        # self.armature_data_nameの振り直しをする
+        # Reassign self.armature_data_name in case of armature duplication.
         self.search_one_time_uuid = uuid.uuid4().hex
-        for found_armature in bpy.data.objects:
+        for found_armature in context.blend_data.objects:
             if found_armature.type != "ARMATURE":
                 continue
             if all(
@@ -263,13 +278,13 @@ class BonePropertyGroup(PropertyGroup):
 
         self.armature_data_name = armature_data.name
 
-        # ボーンの複製が行われた場合を考えてUUIDの重複がある場合再割り当てを行う
-        found_uuids = set()
+        # Reassign UUIDs if duplicate UUIDs exist in case of bone duplication.
+        found_uuids: set[str] = set()
         for bone in armature_data.bones:
-            found_uuid = bone.vrm_addon_extension.uuid
+            found_uuid = get_bone_extension(bone).uuid
             if not found_uuid or found_uuid in found_uuids:
-                bone.vrm_addon_extension.uuid = uuid.uuid4().hex
-            found_uuids.add(bone.vrm_addon_extension.uuid)
+                get_bone_extension(bone).uuid = uuid.uuid4().hex
+            found_uuids.add(get_bone_extension(bone).uuid)
 
         if not value or value not in armature_data.bones:
             if not self.bone_uuid:
@@ -277,14 +292,14 @@ class BonePropertyGroup(PropertyGroup):
             self.bone_uuid = ""
         elif (
             self.bone_uuid
-            and self.bone_uuid == armature_data.bones[value].vrm_addon_extension.uuid
+            and self.bone_uuid == get_bone_extension(armature_data.bones[value]).uuid
         ):
             return
         else:
             bone = armature_data.bones[value]
-            self.bone_uuid = bone.vrm_addon_extension.uuid
+            self.bone_uuid = get_bone_extension(bone).uuid
 
-        ext = armature_data.vrm_addon_extension
+        ext = get_armature_extension(armature_data)
         for collider_group in ext.vrm0.secondary_animation.collider_groups:
             collider_group.refresh(armature)
 
@@ -340,14 +355,14 @@ class BonePropertyGroup(PropertyGroup):
     def get_value(self) -> str:
         logger.warning(
             "BonePropertyGroup.value is deprecated."
-            + " Use BonePropertyGroup.bone_name instead."
+            " Use BonePropertyGroup.bone_name instead."
         )
         return str(self.bone_name)
 
     def set_value(self, value: str) -> None:
         logger.warning(
             "BonePropertyGroup.value is deprecated."
-            + " Use BonePropertyGroup.bone_name instead."
+            " Use BonePropertyGroup.bone_name instead."
         )
         self.bone_name = value
 
@@ -373,7 +388,7 @@ class BonePropertyGroup(PropertyGroup):
 T_co = TypeVar("T_co", covariant=True)
 
 
-# 本物は型引数を取らない
+# The actual type does not take type arguments.
 class CollectionPropertyProtocol(Protocol[T_co]):
     def add(self) -> T_co: ...  # TODO: undocumented
 

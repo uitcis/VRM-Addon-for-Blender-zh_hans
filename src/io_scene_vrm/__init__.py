@@ -11,10 +11,11 @@
 #
 #
 
+# Synchronize with https://github.com/saturday06/VRM-Addon-for-Blender/blob/2_20_49/src/io_scene_vrm/common/version.py#L94-L102
 bl_info = {
     "name": "VRM format",
     "author": "saturday06, iCyP",
-    "version": (2, 20, 38),
+    "version": (2, 20, 64),
     "location": "File > Import-Export",
     "description": "Import-Edit-Export VRM",
     "blender": (2, 93, 0),
@@ -26,7 +27,7 @@ bl_info = {
     "category": "Import-Export",
 }
 
-MAX_SUPPORTED_BLENDER_MAJOR_MINOR_VERSION = (4, 1)
+MAX_SUPPORTED_BLENDER_MAJOR_MINOR_VERSION = (4, 2)
 
 
 def cleanse_modules() -> None:
@@ -62,10 +63,15 @@ def register() -> None:
 
 def unregister() -> None:
     # Lazy import to minimize initialization before blender version checking.
+    import os
+
     from . import registration
 
     registration.unregister()
-    cleanse_modules()
+
+    # https://github.com/saturday06/VRM-Addon-for-Blender/issues/506#issuecomment-2183766778
+    if os.getenv("BLENDER_VRM_DEVEMOPMENT_MODE") == "yes":
+        cleanse_modules()
 
 
 def raise_error_if_too_old_blender() -> None:
@@ -116,14 +122,13 @@ def raise_not_implemented_error(
 ) -> None:
     import bpy
 
+    context = bpy.context
+
     translated_messages = {
         "ja_JP": ja_jp_message,
     }
 
-    if (
-        bpy.app.version >= (2, 80)
-        and bpy.context.preferences.view.use_translate_interface
-    ):
+    if bpy.app.version >= (2, 80) and context.preferences.view.use_translate_interface:
         message = translated_messages.get(bpy.app.translations.locale, default_message)
     else:
         message = default_message
@@ -189,8 +194,8 @@ def extract_github_private_partial_code_archive_if_necessary() -> None:
 
     logger.warning(
         "%s Extracting the partial add-on archive for "
-        + "users who have acquired the add-on "
-        + 'from "Code" -> "Download ZIP" on GitHub ...',
+        "users who have acquired the add-on "
+        'from "Code" -> "Download ZIP" on GitHub ...',
         log_warning_prefix,
     )
 

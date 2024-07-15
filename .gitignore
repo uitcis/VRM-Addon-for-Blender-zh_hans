@@ -42,6 +42,7 @@
 !/tools/*.wsb
 !/tests/ruff.toml
 !/tests/resources
+!/typings/pyproject.toml
 
 *.blend1
 *~
@@ -51,6 +52,7 @@ __pycache__/
 
 /.idea/
 /.venv/
+/.venv-devcontainer/
 /.vscode/
 /docs/website/.hugo_build.lock
 /docs/website/public/
