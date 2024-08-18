@@ -66,5 +66,6 @@
     href += window.location.search
   }
   href += window.location.hash
+  window.console.log("### REPLACE STATE ==>> " + href);
   window.history.replaceState(null, "", href)
 })()
