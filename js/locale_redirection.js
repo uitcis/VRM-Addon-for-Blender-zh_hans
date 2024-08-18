@@ -66,5 +66,5 @@
     href += window.location.search
   }
   href += window.location.hash
-  window.history.replaceState({}, "", href)
+  window.history.replaceState(null, "", href)
 })()
