@@ -1,0 +1,50 @@
+name: release-please
+
+on:
+  workflow_run:
+    workflows: ["test"]
+    branches: [main]
+    types:
+      - completed
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.workflow_run.conclusion != 'success' }}
+    env:
+      BLENDER_ARCHIVE_URL: https://mirrors.ocf.berkeley.edu/blender/release/Blender4.2/blender-4.2.3-linux-x64.tar.xz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # これをやるとrelease-please-actionが安定する気がする
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          target-branch: main
+      - name: Install package
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get dist-upgrade -y
+          sudo apt-get install -y advancecomp blender curl git python3 python3-numpy ruby shellcheck xz-utils
+      - name: Cache archive
+        id: cache-archive
+        uses: actions/cache@v4
+        with:
+          path: blender.tar.xz
+          key: ${{ env.BLENDER_ARCHIVE_URL }}-archive-1
+      - name: Download archive
+        if: steps.cache-archive.outputs.cache-hit != 'true'
+        run: |
+          curl --fail --location --show-error --retry 5 --retry-all-errors "$BLENDER_ARCHIVE_URL" -o blender.tar.xz
+          test "$(md5sum blender.tar.xz)" = "34fe4456252a703c39cb93efbfa84f8c  blender.tar.xz"
+      - name: Release
+        run: ./tools/release.sh
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG_NAME: ${{ steps.release.outputs.tag_name }}
