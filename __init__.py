@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: MIT OR GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2018 iCyP
 
 #
@@ -15,7 +15,11 @@
 bl_info = {
     "name": "VRM format",
     "author": "saturday06, iCyP",
-    "version": (2, 20, 88),
+    "version": (
+        2,  # x-release-please-major
+        28,  # x-release-please-minor
+        0,  # x-release-please-patch
+    ),
     "location": "File > Import-Export",
     "description": "Import-Edit-Export VRM",
     "blender": (2, 93, 0),
